@@ -1,0 +1,174 @@
+import time
+import cv2
+import math
+import threading
+import queue
+import psutil
+import os
+from config import SETTINGS
+from src.camera import Camera
+from src.gesture_detector import GestureDetector
+from src.gesture_classifier import GestureClassifier
+from src.gesture_mapper import GestureMapper
+from src.ui import SmartGestureApp
+from src.logger import logger
+
+class MainApp:
+    def __init__(self):
+        self.camera = Camera(
+            index=SETTINGS["camera"]["index"],
+            width=SETTINGS["camera"]["width"],
+            height=SETTINGS["camera"]["height"],
+            fps=SETTINGS["camera"]["fps"]
+        )
+        
+        self.detector = GestureDetector()
+        self.classifier = GestureClassifier()
+        self.mapper = GestureMapper(SETTINGS["camera"]["width"], SETTINGS["camera"]["height"])
+        self.fps_ema = SETTINGS["camera"]["fps"]
+        
+        self.ui = SmartGestureApp(close_callback=self.stop_system)
+        
+        self.running = False
+        self.frame_queue = queue.Queue(maxsize=2)
+        self.process_thread = None
+        self.stats_thread = None
+        
+        self.cpu_usage = 0.0
+        self.ram_usage = 0.0
+        
+        self.start_system()
+        
+    def start_system(self):
+        if self.camera.start():
+            self.running = True
+            self.process_thread = threading.Thread(target=self.processing_loop, daemon=True)
+            self.process_thread.start()
+            
+            self.stats_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
+            self.stats_thread.start()
+            
+            self.update_ui_loop()
+            return True
+        return False
+        
+    def monitoring_loop(self):
+        process = psutil.Process(os.getpid())
+        while self.running:
+            try:
+                self.cpu_usage = psutil.cpu_percent(interval=1.0)
+                self.ram_usage = process.memory_info().rss / (1024 * 1024) # MB
+            except Exception as e:
+                logger.error(f"Stats error: {e}")
+                time.sleep(1)
+        
+    def stop_system(self):
+        self.running = False
+        self.camera.stop()
+        if self.process_thread:
+            self.process_thread.join(timeout=1.0)
+            
+    def draw_overlays(self, frame, hands_data, progress):
+        if not hands_data:
+            return frame
+            
+        h1 = hands_data[0]['landmarks']
+        index_x, index_y = h1[8][1], h1[8][2]
+        
+        # Virtual cursor
+        cv2.circle(frame, (index_x, index_y), 12, (255, 255, 50), 2)
+        cv2.circle(frame, (index_x, index_y), 3, (255, 255, 50), -1)
+        
+        # Gesture loading ring
+        if progress > 0.0:
+            center = (index_x, index_y)
+            radius = 25
+            angle = int(360 * progress)
+            cv2.ellipse(frame, center, (radius, radius), -90, 0, angle, (0, 255, 0), 4)
+            
+        return frame
+        
+    def processing_loop(self):
+        last_frame_id = -1
+        last_inference_time = 0
+        inference_interval = 1.0 / 30.0 # Max 30 FPS for ML inference
+        
+        while self.running:
+            loop_start = time.time()
+            try:
+                frame, frame_id = self.camera.read()
+                
+                if frame is not None and frame_id != last_frame_id:
+                    last_frame_id = frame_id
+                    
+                    # 1. Send frame to ML model asynchronously (throttle to 30 FPS)
+                    current_time = time.time()
+                    if current_time - last_inference_time >= inference_interval:
+                        timestamp_ms = int(current_time * 1000)
+                        self.detector.detect_async(frame, timestamp_ms)
+                        last_inference_time = current_time
+                    
+                    # 2. Get latest ML result (which may be slightly delayed)
+                    hands_data = self.detector.get_all_hands_data(frame.shape)
+                    
+                    # Draw landmarks on current frame
+                    results = self.detector.get_latest_results()
+                    if results and results.hand_landmarks:
+                        for hand_lms in results.hand_landmarks:
+                            self.detector.draw_landmarks(frame, hand_lms)
+                    
+                    gesture, confidence = self.classifier.classify(hands_data)
+                    frame, action, progress = self.mapper.process(hands_data, gesture, frame)
+                    frame = self.draw_overlays(frame, hands_data, progress)
+                    
+                    time_diff = time.time() - loop_start
+                    current_fps = (1 / time_diff) if time_diff > 0 else 60
+                    self.fps_ema = (0.9 * self.fps_ema) + (0.1 * current_fps)
+                    fps = int(self.fps_ema)
+                    
+                    # Update queue with latest frame and stats
+                    if not self.frame_queue.full():
+                        self.frame_queue.put((frame, hands_data, self.mapper.mode, gesture, confidence, action, fps, self.cpu_usage, self.ram_usage))
+                    else:
+                        # Clear old frame to keep it real-time
+                        try:
+                            self.frame_queue.get_nowait()
+                            self.frame_queue.put_nowait((frame, hands_data, self.mapper.mode, gesture, confidence, action, fps, self.cpu_usage, self.ram_usage))
+                        except queue.Empty:
+                            pass
+                            
+            except Exception as e:
+                logger.error(f"Error in processing loop: {e}")
+                
+            # Pace loop to 60 FPS (16.6ms per frame)
+            elapsed = time.time() - loop_start
+            sleep_time = (1.0 / 60.0) - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+            
+    def update_ui_loop(self):
+        if not self.running:
+            return
+            
+        try:
+            if not self.frame_queue.empty():
+                frame, hands_data, mode, gesture, confidence, action, fps, cpu_usage, ram_usage = self.frame_queue.get_nowait()
+                self.ui.current_hands_data = hands_data  # Store for trainer window
+                self.ui.update_dashboard(mode, gesture, confidence, action, fps, cpu_usage, ram_usage)
+                self.ui.update_frame(frame)
+        except Exception as e:
+            logger.error(f"Error in UI update loop: {e}")
+            
+        self.ui.after(15, self.update_ui_loop)
+        
+    def run(self):
+        try:
+            self.ui.mainloop()
+        except Exception as e:
+            logger.error(f"App crashed: {e}")
+        finally:
+            self.stop_system()
+
+if __name__ == "__main__":
+    app = MainApp()
+    app.run()
