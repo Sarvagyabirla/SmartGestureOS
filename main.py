@@ -30,7 +30,7 @@ class MainApp:
         self.ui = SmartGestureApp(close_callback=self.stop_system)
         
         self.running = False
-        self.frame_queue = queue.Queue(maxsize=2)
+        self.frame_queue = queue.Queue(maxsize=1)
         self.process_thread = None
         self.stats_thread = None
         
@@ -98,14 +98,31 @@ class MainApp:
             try:
                 frame, frame_id = self.camera.read()
                 
+                if not self.camera.is_connected:
+                    import numpy as np
+                    frame = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)
+                    cv2.putText(frame, "CAMERA DISCONNECTED - RECOVERING...", (50, self.camera.height//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    try:
+                        if self.frame_queue.full():
+                            self.frame_queue.get_nowait()
+                        self.frame_queue.put_nowait((frame, [], self.mapper.mode, "Unknown", 0, None, 0, self.cpu_usage, self.ram_usage))
+                    except queue.Empty:
+                        pass
+                    time.sleep(0.1)
+                    continue
+                
                 if frame is not None and frame_id != last_frame_id:
                     last_frame_id = frame_id
                     
-                    # 1. Send frame to ML model asynchronously (throttle to 30 FPS)
+                    # 1. Send frame to ML model asynchronously
                     current_time = time.time()
+                    # Throttle to 5 FPS if sleeping to save massive CPU, otherwise max 30 FPS
+                    inference_interval = 1.0 / 5.0 if self.mapper.is_sleeping else 1.0 / 30.0
+                    
                     if current_time - last_inference_time >= inference_interval:
                         timestamp_ms = int(current_time * 1000)
-                        self.detector.detect_async(frame, timestamp_ms)
+                        small_frame = cv2.resize(frame, (640, 360))
+                        self.detector.detect_async(small_frame, timestamp_ms)
                         last_inference_time = current_time
                     
                     # 2. Get latest ML result (which may be slightly delayed)

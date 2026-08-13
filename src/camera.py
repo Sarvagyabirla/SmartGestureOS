@@ -12,6 +12,7 @@ class Camera:
         self.cap = None
         self.running = False
         self.thread = None
+        self.is_connected = False
         
         self.frame = None
         self.frame_id = 0
@@ -47,6 +48,7 @@ class Camera:
                 
             ret, frame = self.cap.read()
             if not ret:
+                self.is_connected = False
                 failed_reads += 1
                 logger.warning(f"Failed to grab frame (count: {failed_reads})")
                 if failed_reads > 30:
@@ -56,6 +58,7 @@ class Camera:
                     failed_reads = 0
                 continue
                 
+            self.is_connected = True
             failed_reads = 0
             frame = cv2.flip(frame, 1) # Mirror image for intuitive control
             

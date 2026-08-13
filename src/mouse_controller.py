@@ -15,7 +15,7 @@ class MouseController:
         self.last_gesture = None
         self.gesture_start_time = 0
         self.scroll_start_y = 0
-        self.pinch_count = 0
+        self.pinch_state = "IDLE"
         self.last_pinch_time = 0
         
     def process_landmarks(self, lms_list, gesture, frame_w, frame_h):
@@ -25,37 +25,45 @@ class MouseController:
         index_x, index_y = lms_list[8][1], lms_list[8][2]
         now = time.time()
         
+        # Timeout handling
+        if self.pinch_state == "PINCH_RELEASED":
+            if now - self.last_pinch_time > 0.35:
+                # Timed out waiting for second pinch -> single click
+                self.mouse.click(button="left")
+                self.pinch_state = "IDLE"
+
         # Determine if we are no longer pinching
         if gesture != "Pinch" and self.last_gesture == "Pinch":
-            duration = now - self.gesture_start_time
-            if duration <= 0.3:
-                # Short pinch released -> register click candidate
-                self.pinch_count += 1
+            if self.pinch_state == "PINCH_START":
+                self.pinch_state = "PINCH_RELEASED"
                 self.last_pinch_time = now
-            # Always end drag if we were dragging
-            self.mouse.drag(start=False)
-            
-        # Execute clicks after timeout if no second pinch arrives
-        if self.pinch_count > 0 and now - self.last_pinch_time > 0.35:
-            if self.pinch_count == 1:
-                self.mouse.click(button="left")
-            elif self.pinch_count >= 2:
+            elif self.pinch_state == "SECOND_PINCH_START":
                 self.mouse.double_click()
-            self.pinch_count = 0
-        
+                self.pinch_state = "IDLE"
+            elif self.pinch_state == "DRAGGING":
+                self.mouse.drag(start=False)
+                self.pinch_state = "IDLE"
+            
         if gesture == "Pointing":
             self.mouse.move(index_x, index_y, frame_w, frame_h)
-            self.last_gesture = gesture
             
         elif gesture == "Pinch":
             self.mouse.move(index_x, index_y, frame_w, frame_h)
-            if self.last_gesture != "Pinch":
+            if self.pinch_state == "IDLE":
+                self.pinch_state = "PINCH_START"
                 self.gesture_start_time = now
-            elif now - self.gesture_start_time > 0.3:
-                # Long pinch -> Drag
-                self.mouse.drag(start=True)
-                self.pinch_count = 0 # invalidate clicks
-            self.last_gesture = gesture
+            elif self.pinch_state == "PINCH_START":
+                if now - self.gesture_start_time > 0.3:
+                    self.pinch_state = "DRAGGING"
+                    self.mouse.drag(start=True)
+            elif self.pinch_state == "PINCH_RELEASED":
+                self.pinch_state = "SECOND_PINCH_START"
+                self.gesture_start_time = now
+            elif self.pinch_state == "SECOND_PINCH_START":
+                if now - self.gesture_start_time > 0.3:
+                    # Treat holding second pinch as drag just in case
+                    self.pinch_state = "DRAGGING"
+                    self.mouse.drag(start=True)
             
         elif gesture == "Two Fingers":
             self.mouse.drag(start=False)
@@ -72,15 +80,14 @@ class MouseController:
                 elif dy < -0.05:
                     self.mouse.scroll(1)
                     self.scroll_start_y = current_y
-            self.last_gesture = gesture
             
         elif gesture == "Three Fingers": # Right click
             self.mouse.drag(start=False)
             self.mouse.move(index_x, index_y, frame_w, frame_h)
             if self.last_gesture != "Three Fingers":
                 self.mouse.click(button="right")
-            self.last_gesture = gesture
             
         else:
             self.mouse.drag(start=False)
-            self.last_gesture = gesture
+
+        self.last_gesture = gesture

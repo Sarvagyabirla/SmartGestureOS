@@ -76,14 +76,17 @@ class DrawingCanvas:
         self.canvas = np.zeros((self.height, self.width, 3), np.uint8)
         
     def undo(self):
-        if len(self.undo_stack) > 1:
-            self.redo_stack.append(self.undo_stack.pop())
-            self.canvas = self.undo_stack[-1].copy()
+        if len(self.undo_stack) > 0:
+            # We don't want to pop the very first base state if possible, but 
+            # if we do, we just keep canvas as empty.
+            if len(self.undo_stack) > 1 or (len(self.undo_stack) == 1 and np.count_nonzero(self.canvas) > 0):
+                self.redo_stack.append(self.canvas.copy())
+                self.canvas = self.undo_stack.pop()
             
     def redo(self):
         if self.redo_stack:
-            self.canvas = self.redo_stack.pop()
             self.undo_stack.append(self.canvas.copy())
+            self.canvas = self.redo_stack.pop()
             
     def save_image(self):
         if not os.path.exists("screenshots"):

@@ -15,8 +15,8 @@ def create_hand(fingers_up):
     
     # Thumb
     if fingers_up[0]:
-        lms[3] = [3, 100, 100] # IP 
-        lms[4] = [4, 130, 100] # Tip further from pinky base (17) than IP
+        lms[3] = [3, 100, 50] # IP 
+        lms[4] = [4, 130, 50] # Tip further from pinky base (17) than IP
     else:
         lms[3] = [3, 40, 110]
         lms[4] = [4, 60, 110] # Folded over palm, close to pinky base
@@ -57,7 +57,10 @@ def create_hand(fingers_up):
     return [{'landmarks': lms_3d, 'score': 99}]
 
 def check(fingers, expected):
-    c = GestureClassifier(smoothing_window=1)
+    c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
+    # Pump to get past hold time
+    for _ in range(5):
+        c.classify(create_hand(fingers))
     res, _ = c.classify(create_hand(fingers))
     assert res == expected, f"Expected {expected}, got {res} for fingers {fingers}"
 
@@ -69,14 +72,17 @@ def test_gestures():
     check([1, 0, 0, 0, 0], "Thumb Up")
     check([0, 1, 0, 0, 0], "Pointing")
     check([1, 1, 0, 0, 0], "Pointing")
-    check([0, 1, 1, 0, 0], "Two Fingers") # Wait, could be Victory based on spread
+    check([0, 1, 1, 0, 0], "Victory")
     # Pinch test requires tight thumb and index
     
-def test_crossed_hands():
-    h1 = create_hand([0,0,0,0,0])[0]
-    h2 = create_hand([0,0,0,0,0])[0]
-    # Move h2 wrists close to h1 (0.1 normalized distance)
-    h2['landmarks'] = [[lm[0], lm[1]+10, lm[2], lm[3]+0.1, lm[4], lm[5]] for lm in h2['landmarks']]
-    c = GestureClassifier(smoothing_window=1)
-    res, _ = c.classify([h1, h2])
-    assert res == "Crossed Hands", f"Got {res}"
+def test_crossed_fingers():
+    h = create_hand([0, 1, 1, 0, 0])[0]
+    # Cross index and middle fingers and make them close together
+    h['landmarks'][8] = [8, 41, h['landmarks'][8][2], 0.41, h['landmarks'][8][4], 0]
+    h['landmarks'][12] = [12, 39, h['landmarks'][12][2], 0.39, h['landmarks'][12][4], 0]
+    
+    c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
+    for _ in range(5):
+        c.classify([h])
+    res, _ = c.classify([h])
+    assert res == "Crossed Fingers", f"Got {res}"

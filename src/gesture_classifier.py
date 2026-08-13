@@ -94,7 +94,7 @@ class GestureClassifier:
         true_pinch = is_pinch and (d_pinch_to_palm > hand_size * 0.5)
         
         # Check palm orientation for thumb up/down using relative y position
-        thumb_is_higher_than_mcp = thumb_tip[1] < middle_mcp[1]
+        thumb_is_higher_than_mcp = thumb_tip[1] <= middle_mcp[1]
 
         if fingers == [1, 1, 1, 1, 1]: 
             return "Open Palm", base_score

@@ -81,6 +81,8 @@ class GestureMapper:
         self.last_pinch_time = 0
         self.last_brightness_y = None
         self.brightness_gesture_active = False
+        self.sleep_timer = GestureHoldTimer(duration=3.0, repeat_cooldown=3.0)
+        self.is_sleeping = False
         
     def execute_action(self, action_name):
         action_map = {
@@ -128,6 +130,7 @@ class GestureMapper:
         logger.info(f"Switched Mode: {self.mode}")
 
     def process(self, hands_data, gesture, frame):
+        import cv2
         action = None
         progress = self.timer.get_progress()
         
@@ -137,6 +140,21 @@ class GestureMapper:
         h1 = hands_data[0]['landmarks']
         index_x, index_y = h1[8][1], h1[8][2]
         
+        # Check sleep/wake toggle
+        if gesture == "Victory":
+            if self.sleep_timer.check("Victory"):
+                self.is_sleeping = not self.is_sleeping
+                self.feedback.speak("Sleeping" if self.is_sleeping else "Waking up")
+                return frame, "System Sleeping" if self.is_sleeping else "System Woke Up", 1.0
+        else:
+            self.sleep_timer.check(None)
+            
+        if self.is_sleeping:
+            cv2.putText(frame, "Zzz... (Hold Peace Sign to Wake)", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            # Return sleep progress if user is holding Victory, else 0
+            sleep_prog = self.sleep_timer.get_progress() if gesture == "Victory" else 0.0
+            return frame, "Sleeping", sleep_prog
+
         mappings = SETTINGS.get("mappings", {}).get(self.mode, {})
         
         # Check global timed gestures based on mappings

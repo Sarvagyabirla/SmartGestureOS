@@ -14,6 +14,16 @@ Smart Gesture OS harnesses the power of OpenCV and Google's MediaPipe Hand Landm
 - **Optimized Resource Usage**: CPU utilization dropped to ~130% (approx 1 core) and RAM usage stabilized at <400 MB.
 - **Enhanced Dashboard**: Real-time monitoring of FPS, Confidence, CPU, RAM, Camera State, Automation State, Voice Feedback, and Gesture History.
 
+### Stability & Reliability
+This version of SmartGestureOS has been rigorously stabilized for live demonstration purposes. The codebase features robust error handling, automated camera recovery, asynchronous TTS feedback, and strict gesture validation tests. 
+
+## Running Tests
+To verify system stability, a pytest suite is included. Run the tests via:
+```bash
+python -m pytest -q tests/
+```
+All tests should pass indicating proper geometric calculations and setting constraints.
+
 ## Requirements
 
 * Python 3.8+

@@ -85,6 +85,20 @@ class TestGestureMapper(unittest.TestCase):
         
         self.mapper.cycle_mode()
         self.assertEqual(self.mapper.mode, "GENERAL")
+        
+    def test_execute_action_mapping(self):
+        # We can't easily test the side effects of volume/chrome/etc in a headless test,
+        # but we CAN verify that the methods exist and don't throw AttributeError
+        # by checking if the action map contains callable methods
+        
+        # Call it with an invalid action, should return None
+        self.assertIsNone(self.mapper.execute_action("non_existent_action"))
+        
+        # Test just a safe one like switch_mode
+        initial_mode = self.mapper.mode
+        res = self.mapper.execute_action("switch_mode")
+        self.assertEqual(res, "Executed: switch_mode")
+        self.assertNotEqual(self.mapper.mode, initial_mode)
 
 if __name__ == "__main__":
     unittest.main()

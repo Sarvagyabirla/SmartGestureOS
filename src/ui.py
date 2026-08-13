@@ -179,8 +179,12 @@ class SmartGestureApp(ctk.CTk):
             self.frame_width = label_w
             self.frame_height = label_h
             
-        image = Image.fromarray(rgb_frame)
-        image = image.resize((self.frame_width, self.frame_height))
-        self.current_imgtk = ImageTk.PhotoImage(image=image)
-        
-        self.video_label.configure(image=self.current_imgtk)
+        try:
+            image = Image.fromarray(rgb_frame)
+            image = image.resize((self.frame_width, self.frame_height))
+            self.current_imgtk = ImageTk.PhotoImage(image=image)
+            
+            self.video_label.configure(image=self.current_imgtk)
+        except Exception as e:
+            from src.logger import logger
+            logger.debug(f"Frame update skipped during resize: {e}")

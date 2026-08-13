@@ -28,7 +28,6 @@ class SettingsManager:
                     "Thumb Down": "volume_down",
                     "Open Palm": "task_view",
                     "Closed Fist": "show_desktop",
-                    "Crossed Hands": "lock_pc",
                     "Crossed Fingers": "lock_pc",
                     "Call Me": "switch_mode"
                 },
