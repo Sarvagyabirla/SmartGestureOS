@@ -68,7 +68,7 @@ SmartGestureOS/
 ├── main.py                    # Application entry point & thread orchestrator
 ├── config.py                  # Settings loader
 ├── GESTURES.md                # Strict 1-to-1 Gesture to Action mapping documentation
-├── settings.json              # Gesture mappings and configs
+├── profiles/                  # Configuration profiles (default.json)
 └── requirements.txt           # Python dependencies
 ```
 
@@ -93,7 +93,7 @@ Please refer to the [GESTURES.md](GESTURES.md) file for the complete, strict 1-t
 
 ## Troubleshooting
 
-- **No Camera Feed:** Ensure your camera is not being used by another application. Try changing `"index": 0` in `settings.json` to `1` or `2`.
+- **No Camera Feed:** Ensure your camera is not being used by another application. Try changing `"index": 0` in `profiles/default.json` to `1` or `2`.
 - **UI Lag / Low FPS:** Ensure you have adequate lighting. MediaPipe performs best with clear visibility of your hand.
 - **Volume Control Not Working:** `pycaw` requires Windows. Make sure your default audio device is active.
 - **"ModuleNotFoundError":** Ensure you've activated your virtual environment and installed all packages from `requirements.txt`.

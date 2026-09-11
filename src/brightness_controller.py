@@ -1,56 +1,46 @@
-import screen_brightness_control as sbc
+import ctypes
+from ctypes import wintypes
 from .logger import logger
+
+class PhysicalMonitor(ctypes.Structure):
+    _fields_ = [('handle', wintypes.HANDLE),
+                ('description', wintypes.WCHAR * 128)]
 
 class BrightnessController:
     def __init__(self):
-        try:
-            brightness_list = sbc.get_brightness()
-            self.current = brightness_list[0] if brightness_list else 50
-        except Exception as e:
-            logger.warning(f"Could not get initial brightness: {e}")
-            self.current = 50
+        self.current = 50
         self.last_applied = int(self.current)
-        
-    def set_brightness_by_distance(self, d_thumb_index, min_dist=30, max_dist=250):
-        vol_perc = (d_thumb_index - min_dist) / (max_dist - min_dist)
-        vol_perc = max(0.0, min(1.0, vol_perc))
-        target_brightness = int(vol_perc * 100)
-        
-        # Smooth lerping
-        self.current = self.current + (target_brightness - self.current) * 0.2
-        brightness = int(self.current)
-        
         try:
-            sbc.set_brightness(brightness)
+            self.user32 = ctypes.windll.user32
+            self.dxva2 = ctypes.windll.dxva2
         except Exception as e:
-            logger.error(f"Failed to set brightness: {e}")
-        return brightness
+            logger.error(f"Failed to load user32/dxva2: {e}")
+            self.user32 = None
+            self.dxva2 = None
         
-    def adjust_brightness(self, delta):
-        target_brightness = self.current + delta
-        target_brightness = max(0, min(100, target_brightness))
-        
-        # Smooth lerping
-        self.current = self.current + (target_brightness - self.current) * 0.5
-        brightness = int(self.current)
-        
-        if brightness != self.last_applied:
-            try:
-                sbc.set_brightness(brightness)
-                self.last_applied = brightness
-            except Exception as e:
-                logger.error(f"Failed to set brightness: {e}")
-        return brightness
-        
+    def _set_brightness_api(self, level):
+        if not self.user32 or not self.dxva2:
+            return
+            
+        try:
+            # 2 = MONITOR_DEFAULTTONEAREST
+            monitor = self.user32.MonitorFromWindow(0, 2) 
+            num_monitors = wintypes.DWORD()
+            if self.dxva2.GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, ctypes.byref(num_monitors)):
+                physical_monitors = (PhysicalMonitor * num_monitors.value)()
+                if self.dxva2.GetPhysicalMonitorsFromHMONITOR(monitor, num_monitors.value, physical_monitors):
+                    for i in range(num_monitors.value):
+                        self.dxva2.SetMonitorBrightness(physical_monitors[i].handle, int(level))
+                    self.dxva2.DestroyPhysicalMonitors(num_monitors.value, physical_monitors)
+        except Exception as e:
+            logger.error(f"Failed to set brightness via API: {e}")
+
     def set_absolute_brightness(self, target_brightness):
         target_brightness = max(0, min(100, target_brightness))
         self.current = self.current + (target_brightness - self.current) * 0.2
         brightness = int(self.current)
         
         if brightness != self.last_applied:
-            try:
-                sbc.set_brightness(brightness)
-                self.last_applied = brightness
-            except Exception as e:
-                logger.error(f"Failed to set brightness: {e}")
+            self._set_brightness_api(brightness)
+            self.last_applied = brightness
         return brightness

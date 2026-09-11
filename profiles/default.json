@@ -8,9 +8,10 @@
     },
     "gestures": {
         "sensitivity": 0.7,
-        "cooldown": 0.5,
-        "smoothing": 20.0,
-        "hold_time_ms": 140.0
+        "cooldown_ms": 500,
+        "smoothing": 5,
+        "hold_time_ms": 300,
+        "base_hand_size": 1.0
     },
     "ui": {
         "theme": "dark",
@@ -19,13 +20,12 @@
     "mappings": {
         "GENERAL": {
             "Victory": "open_vscode",
-            "Rock On": "open_explorer",
+            "Rock On": "open_chrome",
             "Four Fingers": "screenshot",
             "Thumb Up": "volume_up",
             "Thumb Down": "volume_down",
             "Open Palm": "task_view",
             "Closed Fist": "show_desktop",
-            "Crossed Hands": "lock_pc",
             "Crossed Fingers": "lock_pc",
             "Call Me": "switch_mode"
         },
@@ -34,10 +34,7 @@
             "Victory": "next_track",
             "Three Fingers": "prev_track",
             "Closed Fist": "mute",
-            "Call Me": "switch_mode",
-            "Pointing": "play_pause",
-            "Rock On": "next_track",
-            "Two Fingers": "prev_track"
+            "Call Me": "switch_mode"
         },
         "DRAW": {
             "Victory": "undo",
@@ -45,12 +42,16 @@
             "Four Fingers": "save_drawing",
             "Thumb Up": "cycle_color",
             "Thumb Down": "toggle_eraser",
-            "Call Me": "switch_mode",
-            "Rock On": "save_drawing"
+            "Call Me": "switch_mode"
         }
     },
     "calibration": {
         "hand_size_baseline": 1.0,
-        "pointer_extension_ratio": 0.4
+        "pointer_extension_ratio": 0.4,
+        "pinch_enter_threshold": 0.45,
+        "pinch_release_threshold": 0.6,
+        "two_finger_max_spacing": 0.2,
+        "victory_min_spacing": 0.35,
+        "active_roi_margin": 0.2
     }
 }

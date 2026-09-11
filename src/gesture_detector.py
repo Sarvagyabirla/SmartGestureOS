@@ -4,7 +4,11 @@ import time
 import threading
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from dataclasses import dataclass
 from .logger import logger
+
+from .models import Landmark
+
 
 class GestureDetector:
     def __init__(self, max_hands=2, detection_con=0.8, tracking_con=0.8):
@@ -91,11 +95,25 @@ class GestureDetector:
         
         if results and results.hand_landmarks:
             h, w, _ = img_shape
+            # Assuming hand_world_landmarks are available in results
+            world_lms = results.hand_world_landmarks if hasattr(results, 'hand_world_landmarks') else None
+            
             for i, hand_lms in enumerate(results.hand_landmarks):
                 lms_list = []
+                current_world_lms = world_lms[i] if (world_lms and i < len(world_lms)) else None
+                
                 for id, lm in enumerate(hand_lms):
                     cx, cy = int(lm.x * w), int(lm.y * h)
-                    lms_list.append([id, cx, cy, lm.x, lm.y, lm.z])
+                    w_lm = current_world_lms[id] if current_world_lms else None
+                    wx = w_lm.x if w_lm else 0.0
+                    wy = w_lm.y if w_lm else 0.0
+                    wz = w_lm.z if w_lm else 0.0
+                    
+                    lms_list.append(Landmark(
+                        id=id, pixel_x=cx, pixel_y=cy,
+                        x=lm.x, y=lm.y, z=lm.z,
+                        world_x=wx, world_y=wy, world_z=wz
+                    ))
                 
                 score = 0
                 if results.handedness and i < len(results.handedness):
@@ -106,3 +124,10 @@ class GestureDetector:
                     "score": int(score)
                 })
         return hands_data
+        
+    def close(self):
+        if self.detector:
+            try:
+                self.detector.close()
+            except Exception as e:
+                logger.error(f"Error closing detector: {e}")

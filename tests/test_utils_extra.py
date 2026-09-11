@@ -57,11 +57,17 @@ def test_virtual_mouse_deadzone():
     
     # Move by just 1 pixel in camera space (should map to small screen movement)
     # If it falls within deadzone, last_pos won't change
+    time.sleep(0.016)
     vm.move(641, 360, 1280, 720)
     assert vm.last_pos == initial_pos
     
     # Move far away
+    time.sleep(0.016)
     vm.move(1000, 600, 1280, 720)
+    # Need to pump a few times because OneEuroFilter smooths out sudden jumps
+    for _ in range(5):
+        time.sleep(0.016)
+        vm.move(1000, 600, 1280, 720)
     assert vm.last_pos != initial_pos
 
 def test_drawing_canvas():

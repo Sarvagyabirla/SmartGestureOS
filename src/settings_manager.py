@@ -11,47 +11,31 @@ class SettingsManager:
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
         self.current_profile = "default"
         self.settings = {}
+        self.callbacks = []
         self.load_profile(self.current_profile)
         
+    def register_callback(self, callback):
+        if callback not in self.callbacks:
+            self.callbacks.append(callback)
+            
+    def apply_settings(self):
+        for callback in self.callbacks:
+            try:
+                callback()
+            except Exception as e:
+                import logging
+                logging.error(f"Error in settings callback: {e}")
+        
     def _get_default_settings(self):
-        return {
-            "profile_name": "default",
-            "camera": {"index": 0, "width": 1280, "height": 720, "fps": 30},
-            "gestures": {"sensitivity": 0.7, "cooldown": 0.5, "smoothing": 5, "hold_time_ms": 300},
-            "ui": {"theme": "dark", "color_theme": "blue"},
-            "mappings": {
-                "GENERAL": {
-                    "Victory": "open_vscode",
-                    "Rock On": "open_chrome",
-                    "Four Fingers": "screenshot",
-                    "Thumb Up": "volume_up",
-                    "Thumb Down": "volume_down",
-                    "Open Palm": "task_view",
-                    "Closed Fist": "show_desktop",
-                    "Crossed Fingers": "lock_pc",
-                    "Call Me": "switch_mode"
-                },
-                "MEDIA": {
-                    "Pinch": "play_pause",
-                    "Victory": "next_track",
-                    "Three Fingers": "prev_track",
-                    "Closed Fist": "mute",
-                    "Call Me": "switch_mode"
-                },
-                "DRAW": {
-                    "Victory": "undo",
-                    "Three Fingers": "redo",
-                    "Four Fingers": "save_drawing",
-                    "Thumb Up": "cycle_color",
-                    "Thumb Down": "toggle_eraser",
-                    "Call Me": "switch_mode"
-                }
-            },
-            "calibration": {
-                "hand_size_baseline": 1.0,
-                "pointer_extension_ratio": 0.4
-            }
-        }
+        defaults_path = BASE_DIR / "config" / "defaults.json"
+        if defaults_path.exists():
+            try:
+                with open(defaults_path, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                import logging
+                logging.error(f"Failed to load authoritative defaults.json: {e}")
+        return {"profile_name": "default"}
         
     def _get_profile_path(self, profile_name):
         return self.profiles_dir / f"{profile_name}.json"
@@ -75,6 +59,7 @@ class SettingsManager:
                     self.settings.clear()
                     self.settings.update(merged)
                     self.current_profile = profile_name
+                    self.apply_settings()
                     return True
             except Exception as e:
                 import logging
@@ -86,6 +71,7 @@ class SettingsManager:
         self.settings["profile_name"] = profile_name
         self.current_profile = profile_name
         self.save_profile()
+        self.apply_settings()
         return True
         
     def save_profile(self):
@@ -93,6 +79,7 @@ class SettingsManager:
         try:
             with open(path, "w") as f:
                 json.dump(self.settings, f, indent=4)
+            self.apply_settings()
             return True
         except Exception as e:
             import logging

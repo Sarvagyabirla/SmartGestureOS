@@ -44,13 +44,22 @@ class VolumeController:
             logger.error(f"Failed to set volume: {e}")
         return int(vol_perc * 100)
 
-    def _action(self, key, cooldown=0.3):
-        if time.time() - self.last_action_time > cooldown:
-            keyboard.send(key)
-            self.last_action_time = time.time()
-
     def volume_up(self):
-        self._action("volume up")
+        if time.time() - self.last_action_time > 0.05:
+            if self.volume:
+                try:
+                    vol = self.volume.GetMasterVolumeLevelScalar()
+                    self.volume.SetMasterVolumeLevelScalar(min(1.0, vol + 0.02), None)
+                except:
+                    pass
+            self.last_action_time = time.time()
         
     def volume_down(self):
-        self._action("volume down")
+        if time.time() - self.last_action_time > 0.05:
+            if self.volume:
+                try:
+                    vol = self.volume.GetMasterVolumeLevelScalar()
+                    self.volume.SetMasterVolumeLevelScalar(max(0.0, vol - 0.02), None)
+                except:
+                    pass
+            self.last_action_time = time.time()

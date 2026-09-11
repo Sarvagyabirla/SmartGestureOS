@@ -5,6 +5,7 @@ import threading
 import queue
 import psutil
 import os
+import collections
 from config import SETTINGS
 from src.camera import Camera
 from src.gesture_detector import GestureDetector
@@ -25,7 +26,7 @@ class MainApp:
         self.detector = GestureDetector()
         self.classifier = GestureClassifier()
         self.mapper = GestureMapper(SETTINGS["camera"]["width"], SETTINGS["camera"]["height"])
-        self.fps_ema = SETTINGS["camera"]["fps"]
+        self.fps_history = collections.deque(maxlen=30)
         
         self.ui = SmartGestureApp(close_callback=self.stop_system)
         
@@ -53,11 +54,35 @@ class MainApp:
         return False
         
     def monitoring_loop(self):
-        process = psutil.Process(os.getpid())
+        try:
+            process = psutil.Process(os.getpid())
+            process.cpu_percent() # initial call
+        except psutil.NoSuchProcess:
+            return
+            
         while self.running:
             try:
-                self.cpu_usage = psutil.cpu_percent(interval=1.0)
-                self.ram_usage = process.memory_info().rss / (1024 * 1024) # MB
+                # Sleep in smaller increments to allow thread to exit quickly
+                for _ in range(10):
+                    if not self.running:
+                        break
+                    time.sleep(0.1)
+                
+                if not self.running:
+                    break
+                    
+                total_cpu = process.cpu_percent()
+                total_ram = process.memory_info().rss
+                
+                for child in process.children(recursive=True):
+                    try:
+                        total_cpu += child.cpu_percent()
+                        total_ram += child.memory_info().rss
+                    except psutil.NoSuchProcess:
+                        pass
+                        
+                self.cpu_usage = total_cpu
+                self.ram_usage = total_ram / (1024 * 1024) # MB
             except Exception as e:
                 logger.error(f"Stats error: {e}")
                 time.sleep(1)
@@ -65,15 +90,21 @@ class MainApp:
     def stop_system(self):
         self.running = False
         self.camera.stop()
+        if hasattr(self, 'mapper'):
+            self.mapper.cleanup()
+        if hasattr(self, 'detector'):
+            self.detector.close()
         if self.process_thread:
             self.process_thread.join(timeout=1.0)
+        if self.stats_thread:
+            self.stats_thread.join(timeout=1.0)
             
     def draw_overlays(self, frame, hands_data, progress):
         if not hands_data:
             return frame
             
         h1 = hands_data[0]['landmarks']
-        index_x, index_y = h1[8][1], h1[8][2]
+        index_x, index_y = h1[8].pixel_x, h1[8].pixel_y
         
         # Virtual cursor
         cv2.circle(frame, (index_x, index_y), 12, (255, 255, 50), 2)
@@ -105,7 +136,7 @@ class MainApp:
                     try:
                         if self.frame_queue.full():
                             self.frame_queue.get_nowait()
-                        self.frame_queue.put_nowait((frame, [], self.mapper.mode, "Unknown", 0, None, 0, self.cpu_usage, self.ram_usage))
+                        self.frame_queue.put_nowait((frame, [], self.mapper.mode, "Unknown", 0, None, 0, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
                     except queue.Empty:
                         pass
                     time.sleep(0.1)
@@ -134,23 +165,24 @@ class MainApp:
                         for hand_lms in results.hand_landmarks:
                             self.detector.draw_landmarks(frame, hand_lms)
                     
-                    gesture, confidence = self.classifier.classify(hands_data)
-                    frame, action, progress = self.mapper.process(hands_data, gesture, frame)
+                    result = self.classifier.classify(hands_data)
+                    stable_gesture, raw_gesture, confidence = result.gesture, result.raw_gesture, int(result.confidence)
+                    frame, action, progress = self.mapper.process(hands_data, stable_gesture, raw_gesture, frame)
                     frame = self.draw_overlays(frame, hands_data, progress)
                     
                     time_diff = time.time() - loop_start
                     current_fps = (1 / time_diff) if time_diff > 0 else 60
-                    self.fps_ema = (0.9 * self.fps_ema) + (0.1 * current_fps)
-                    fps = int(self.fps_ema)
+                    self.fps_history.append(current_fps)
+                    fps = int(sum(self.fps_history) / len(self.fps_history))
                     
                     # Update queue with latest frame and stats
                     if not self.frame_queue.full():
-                        self.frame_queue.put((frame, hands_data, self.mapper.mode, gesture, confidence, action, fps, self.cpu_usage, self.ram_usage))
+                        self.frame_queue.put((frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
                     else:
                         # Clear old frame to keep it real-time
                         try:
                             self.frame_queue.get_nowait()
-                            self.frame_queue.put_nowait((frame, hands_data, self.mapper.mode, gesture, confidence, action, fps, self.cpu_usage, self.ram_usage))
+                            self.frame_queue.put_nowait((frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
                         except queue.Empty:
                             pass
                             
@@ -169,9 +201,9 @@ class MainApp:
             
         try:
             if not self.frame_queue.empty():
-                frame, hands_data, mode, gesture, confidence, action, fps, cpu_usage, ram_usage = self.frame_queue.get_nowait()
+                frame, hands_data, mode, gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping = self.frame_queue.get_nowait()
                 self.ui.current_hands_data = hands_data  # Store for trainer window
-                self.ui.update_dashboard(mode, gesture, confidence, action, fps, cpu_usage, ram_usage)
+                self.ui.update_dashboard(mode, gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping)
                 self.ui.update_frame(frame)
         except Exception as e:
             logger.error(f"Error in UI update loop: {e}")

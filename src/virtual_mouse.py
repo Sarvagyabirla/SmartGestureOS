@@ -1,7 +1,14 @@
-import mouse
 import time
 from .utils import PointSmoother
 import screeninfo
+import ctypes
+
+# Windows API constants
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_WHEEL = 0x0800
 
 class VirtualMouse:
     def __init__(self, min_cutoff=0.8, beta=0.2, deadzone=1.5):
@@ -21,6 +28,9 @@ class VirtualMouse:
         self.is_dragging = False
         self.last_pos = None
         
+        # Pre-load windll to avoid lookup overhead
+        self.user32 = ctypes.windll.user32
+        
     def map_coordinates(self, x, y, cam_w, cam_h):
         # Screen Coordinate Normalization (Active center area)
         active_w = cam_w * 0.6
@@ -38,7 +48,7 @@ class VirtualMouse:
     def move(self, x, y, cam_w, cam_h):
         screen_x, screen_y = self.map_coordinates(x, y, cam_w, cam_h)
         
-        t = time.time()
+        t = time.perf_counter()
         smooth_x, smooth_y = self.smoother.update(t, screen_x, screen_y)
         
         final_x = max(0, min(int(smooth_x), self.screen_w - 1))
@@ -53,7 +63,7 @@ class VirtualMouse:
         self.last_pos = (final_x, final_y)
         
         try:
-            mouse.move(final_x, final_y, absolute=True, duration=0)
+            self.user32.SetCursorPos(final_x, final_y)
         except Exception as e:
             from .logger import logger
             logger.error(f"Failed to move mouse: {e}")
@@ -61,28 +71,37 @@ class VirtualMouse:
     def click(self, button="left"):
         current_time = time.time()
         if current_time - self.last_click_time > 0.3:
-            mouse.click(button=button)
+            if button == "left":
+                self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            elif button == "right":
+                self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             self.last_click_time = current_time
             
     def double_click(self):
         current_time = time.time()
         if current_time - self.last_click_time > 0.5:
-            mouse.double_click(button="left")
+            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             self.last_click_time = current_time
             
     def scroll(self, amount):
-        mouse.wheel(amount)
+        wheel_delta = int(amount * 120) & 0xFFFFFFFF
+        self.user32.mouse_event(MOUSEEVENTF_WHEEL, 0, 0, wheel_delta, 0)
         
     def zoom(self, amount):
         import keyboard
         keyboard.press('ctrl')
-        mouse.wheel(amount)
+        self.scroll(amount)
         keyboard.release('ctrl')
         
     def drag(self, start=True):
         if start and not self.is_dragging:
-            mouse.press(button="left")
+            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
             self.is_dragging = True
         elif not start and self.is_dragging:
-            mouse.release(button="left")
+            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             self.is_dragging = False

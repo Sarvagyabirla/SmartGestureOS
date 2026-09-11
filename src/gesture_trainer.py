@@ -15,21 +15,53 @@ class GestureTrainer:
         
     def _normalize_landmarks(self, landmarks):
         """
-        Takes raw landmarks list [(id, x, y, z), ...].
+        Takes raw landmarks list [{'x': x, 'y': y, 'z': z}, ...].
         Returns a flattened numpy array of 63 floats (21 * 3) normalized by scale and translation.
         """
         if not landmarks or len(landmarks) != 21:
             return None
             
         # Convert to numpy array of just (x, y, z)
-        coords = np.array([[lm[1], lm[2], lm[3] if len(lm)>3 else 0.0] for lm in landmarks])
+        if isinstance(landmarks[0], dict):
+            coords = np.array([[lm['x'], lm['y'], lm.get('z', 0.0)] for lm in landmarks])
+        elif hasattr(landmarks[0], 'x'):
+            coords = np.array([[lm.x, lm.y, getattr(lm, 'z', 0.0)] for lm in landmarks])
+        else:
+            coords = np.array([[lm[1], lm[2], lm[3] if len(lm) > 3 else 0.0] for lm in landmarks])
         
         # 1. Translate wrist to origin
         wrist = coords[0]
         coords = coords - wrist
         
-        # 2. Scale normalization
-        # Find maximum distance from wrist to any landmark
+        # 2. Rotational Alignment
+        # y-axis: wrist (0) to middle_mcp (9)
+        y_axis = coords[9]
+        norm_y = np.linalg.norm(y_axis)
+        if norm_y > 1e-6:
+            y_axis = y_axis / norm_y
+        else:
+            y_axis = np.array([0.0, 1.0, 0.0])
+            
+        # approximate x-axis from index_mcp (5) to pinky_mcp (17)
+        x_axis_approx = coords[17] - coords[5]
+        
+        # z-axis: cross product of x_axis_approx and y_axis (palm normal)
+        z_axis = np.cross(x_axis_approx, y_axis)
+        norm_z = np.linalg.norm(z_axis)
+        if norm_z > 1e-6:
+            z_axis = z_axis / norm_z
+        else:
+            z_axis = np.array([0.0, 0.0, 1.0])
+            
+        # true x-axis: cross product of y_axis and z_axis
+        x_axis = np.cross(y_axis, z_axis)
+        x_axis = x_axis / (np.linalg.norm(x_axis) + 1e-6)
+        
+        # Rotation matrix to align to canonical frame
+        R = np.vstack([x_axis, y_axis, z_axis])
+        coords = coords @ R.T
+        
+        # 3. Scale normalization
         distances = np.linalg.norm(coords, axis=1)
         max_dist = np.max(distances)
         if max_dist > 0:
