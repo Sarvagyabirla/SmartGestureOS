@@ -1,35 +1,37 @@
 import pyttsx3
 import threading
+import queue
 from .logger import logger
 
 class FeedbackController:
     def __init__(self):
-        self.engine = None
-        self._init_engine()
-        self.thread_lock = threading.Lock()
+        self.queue = queue.Queue()
+        self.thread = threading.Thread(target=self._tts_worker, daemon=True)
+        self.thread.start()
         
-    def _init_engine(self):
+    def _tts_worker(self):
         try:
-            self.engine = pyttsx3.init()
-            self.engine.setProperty('rate', 170)
+            # Initialize SAPI5 engine once in the dedicated thread
+            engine = pyttsx3.init()
+            engine.setProperty('rate', 170)
         except Exception as e:
             logger.error(f"Failed to init pyttsx3: {e}")
-            self.engine = None
-
-    def _speak_thread(self, text):
-        with self.thread_lock:
+            return
+            
+        while True:
+            text = self.queue.get()
+            if text is None:
+                break
             try:
-                # Need to re-init for macOS/Linux sometimes, but Windows SAPI5 handles it mostly fine
-                # However, pyttsx3 is strictly single-threaded event loop. We can run it in a thread if instantiated there.
-                engine = pyttsx3.init()
-                engine.setProperty('rate', 170)
                 engine.say(text)
                 engine.runAndWait()
             except Exception as e:
                 logger.error(f"TTS error: {e}")
+            self.queue.task_done()
 
     def speak(self, text):
-        if not self.engine:
-            return
-        # Run in a daemon thread so it doesn't block the gesture loop
-        threading.Thread(target=self._speak_thread, args=(text,), daemon=True).start()
+        self.queue.put(text)
+        
+    def stop(self):
+        self.queue.put(None)
+        self.thread.join(timeout=1.0)

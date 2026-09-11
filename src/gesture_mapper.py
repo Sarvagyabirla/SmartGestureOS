@@ -84,39 +84,56 @@ class GestureMapper:
         self.sleep_timer = GestureHoldTimer(duration=3.0, repeat_cooldown=3.0)
         self.is_sleeping = False
         
-    def execute_action(self, action_name):
-        action_map = {
-            "open_vscode": self.shortcut.open_vscode,
-            "open_chrome": self.shortcut.open_chrome,
-            "open_calculator": self.shortcut.open_calculator,
-            "open_explorer": self.shortcut.open_explorer,
-            "open_notepad": self.shortcut.open_notepad,
-            "lock_pc": self.shortcut.lock_pc,
-            "screenshot": lambda: self.keyboard.keyboard.hotkey("win", "print screen"),
-            "task_view": self.desktop.task_view,
-            "show_desktop": self.desktop.show_desktop,
-            "snap_left": self.shortcut.snap_left,
-            "snap_right": self.shortcut.snap_right,
-            "maximize": self.shortcut.maximize,
-            "minimize": self.shortcut.minimize,
-            "play_pause": self.media.play_pause,
-            "next_track": self.media.next_track,
-            "prev_track": self.media.prev_track,
-            "mute": self.media.mute,
-            "volume_up": self.volume.volume_up,
-            "volume_down": self.volume.volume_down,
-            "switch_mode": self.cycle_mode,
-            "switch_to_draw": lambda: self.set_mode("DRAW"),
-            "undo": self.canvas.undo,
-            "redo": self.canvas.redo,
-            "save_drawing": self.canvas.save_image,
-            "cycle_color": self.canvas.cycle_color,
-            "toggle_eraser": self.canvas.toggle_eraser
+        self.action_registry = {
+            "open_vscode": {"func": self.shortcut.open_vscode, "repeatable": False},
+            "open_chrome": {"func": self.shortcut.open_chrome, "repeatable": False},
+            "open_calculator": {"func": self.shortcut.open_calculator, "repeatable": False},
+            "open_explorer": {"func": self.shortcut.open_explorer, "repeatable": False},
+            "open_notepad": {"func": self.shortcut.open_notepad, "repeatable": False},
+            "lock_pc": {"func": self.shortcut.lock_pc, "repeatable": False},
+            "screenshot": {"func": self.desktop.take_screenshot, "repeatable": False},
+            "task_view": {"func": self.desktop.task_view, "repeatable": False},
+            "show_desktop": {"func": self.desktop.show_desktop, "repeatable": False},
+            "snap_left": {"func": self.shortcut.snap_left, "repeatable": False},
+            "snap_right": {"func": self.shortcut.snap_right, "repeatable": False},
+            "maximize": {"func": self.shortcut.maximize, "repeatable": False},
+            "minimize": {"func": self.shortcut.minimize, "repeatable": False},
+            "play_pause": {"func": self.media.play_pause, "repeatable": False},
+            "next_track": {"func": self.media.next_track, "repeatable": False},
+            "prev_track": {"func": self.media.prev_track, "repeatable": False},
+            "mute": {"func": self.media.mute, "repeatable": False},
+            "volume_up": {"func": self.volume.volume_up, "repeatable": True},
+            "volume_down": {"func": self.volume.volume_down, "repeatable": True},
+            "switch_mode": {"func": self.cycle_mode, "repeatable": False},
+            "switch_to_draw": {"func": lambda: self.set_mode("DRAW"), "repeatable": False},
+            "undo": {"func": self.canvas.undo, "repeatable": True},
+            "redo": {"func": self.canvas.redo, "repeatable": True},
+            "save_drawing": {"func": self.canvas.save_image, "repeatable": False},
+            "cycle_color": {"func": self.canvas.cycle_color, "repeatable": False},
+            "toggle_eraser": {"func": self.canvas.toggle_eraser, "repeatable": False},
+            "toggle_sleep": {"func": lambda: None, "repeatable": False} # Handled explicitly in process()
         }
-        if action_name in action_map:
-            action_map[action_name]()
-            self.feedback.speak(action_name.replace("_", " "))
-            return f"Executed: {action_name}"
+        
+        from src.settings_manager import settings_manager
+        settings_manager.register_callback(self.on_settings_changed)
+        self.on_settings_changed()
+        
+    def on_settings_changed(self):
+        from config import SETTINGS
+        cooldown_ms = SETTINGS.get("gestures", {}).get("cooldown_ms", 400)
+        self.timer.duration = cooldown_ms / 1000.0
+        self.timer.repeat_cooldown = (cooldown_ms / 1000.0) * 0.75
+        
+    def execute_action(self, action_name):
+        if action_name in self.action_registry:
+            try:
+                self.action_registry[action_name]["func"]()
+                self.feedback.speak(action_name.replace("_", " "))
+                return f"Executed: {action_name}"
+            except Exception as e:
+                from .logger import logger
+                logger.error(f"Action '{action_name}' failed: {e}")
+                return f"Failed: {action_name}"
         return None
         
     def set_mode(self, mode):
@@ -129,20 +146,31 @@ class GestureMapper:
         self.mode = self.modes[(idx + 1) % len(self.modes)]
         logger.info(f"Switched Mode: {self.mode}")
 
-    def process(self, hands_data, gesture, frame):
+    def get_sleep_gesture(self, mappings):
+        for g, action_name in mappings.items():
+            if action_name == "toggle_sleep":
+                return g
+        return None
+
+    def process(self, hands_data, stable_gesture, raw_gesture, frame):
         import cv2
         action = None
         progress = self.timer.get_progress()
+        gesture = stable_gesture
         
         if not hands_data:
             return frame, action, progress
             
         h1 = hands_data[0]['landmarks']
-        index_x, index_y = h1[8][1], h1[8][2]
+        index_x, index_y = h1[8].pixel_x, h1[8].pixel_y
+        
+        mappings = SETTINGS.get("mappings", {}).get(self.mode, {})
+        sleep_gesture = self.get_sleep_gesture(mappings)
         
         # Check sleep/wake toggle
-        if gesture == "Victory":
-            if self.sleep_timer.check("Victory"):
+        gesture = stable_gesture
+        if sleep_gesture and gesture == sleep_gesture:
+            if self.sleep_timer.check(sleep_gesture):
                 self.is_sleeping = not self.is_sleeping
                 self.feedback.speak("Sleeping" if self.is_sleeping else "Waking up")
                 return frame, "System Sleeping" if self.is_sleeping else "System Woke Up", 1.0
@@ -150,17 +178,19 @@ class GestureMapper:
             self.sleep_timer.check(None)
             
         if self.is_sleeping:
-            cv2.putText(frame, "Zzz... (Hold Peace Sign to Wake)", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-            # Return sleep progress if user is holding Victory, else 0
-            sleep_prog = self.sleep_timer.get_progress() if gesture == "Victory" else 0.0
+            msg = f"Zzz... (Hold {sleep_gesture} to Wake)" if sleep_gesture else "Zzz... (No Wake Gesture Mapped)"
+            cv2.putText(frame, msg, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            sleep_prog = self.sleep_timer.get_progress() if (sleep_gesture and gesture == sleep_gesture) else 0.0
             return frame, "Sleeping", sleep_prog
 
-        mappings = SETTINGS.get("mappings", {}).get(self.mode, {})
-        
         # Check global timed gestures based on mappings
         mapped_action = mappings.get(gesture)
-        if mapped_action:
-            is_repeatable = mapped_action in ["volume_up", "volume_down"]
+        if mapped_action == "toggle_sleep":
+            self.timer.check(None)
+            progress = self.sleep_timer.get_progress()
+        elif mapped_action:
+            action_info = self.action_registry.get(mapped_action, {})
+            is_repeatable = action_info.get("repeatable", False)
             if self.timer.check(gesture, is_repeatable=is_repeatable):
                 action = self.execute_action(mapped_action)
                 if action:
@@ -172,10 +202,10 @@ class GestureMapper:
 
         # Mode specific immediate execution
         if self.mode == "GENERAL":
-            if gesture in ["Pinch", "Closed Fist", "Pointing", "Victory", "Two Fingers", "Three Fingers"]:
-                self.mouse.process_landmarks(h1, gesture, self.frame_w, self.frame_h)
+            if raw_gesture in ["Pinch", "Closed Fist", "Pointing", "Victory", "Two Fingers", "Three Fingers"]:
+                self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h)
             elif gesture == "Middle Finger":
-                current_y = h1[12][4] # Middle finger tip Y (normalized)
+                current_y = h1[12].y # Middle finger tip Y (normalized)
                 # Absolute positioning: Y=0 (top) is 100% brightness, Y=1 (bottom) is 0% brightness
                 # Clamp Y between 0.2 and 0.8 to allow comfortable arm range
                 clamped_y = max(0.2, min(0.8, current_y))
@@ -197,7 +227,7 @@ class GestureMapper:
             if not draw_mode:
                 cv2.circle(frame, (sx, sy), 8, self.canvas.color, 2)
                 
-            if gesture == "Closed Fist":
+            if gesture == "Pinch":
                 self.canvas.clear()
                 action = "Canvas Cleared"
             frame = self.canvas.get_overlay(frame)
@@ -206,3 +236,9 @@ class GestureMapper:
             pass # Volume is mapped globally to Thumb Up/Down now
             
         return frame, action, progress
+
+    def cleanup(self):
+        if hasattr(self, 'mouse'):
+            self.mouse.mouse.drag(start=False)
+        if hasattr(self, 'feedback'):
+            self.feedback.stop()

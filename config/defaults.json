@@ -1,5 +1,5 @@
 {
-    "profile_name": "Sarvagya",
+    "profile_name": "default",
     "camera": {
         "index": 0,
         "width": 1280,
@@ -8,9 +8,10 @@
     },
     "gestures": {
         "sensitivity": 0.7,
-        "cooldown": 0.5,
-        "smoothing": 20.0,
-        "hold_time_ms": 100.0
+        "cooldown_ms": 500,
+        "smoothing": 5,
+        "hold_time_ms": 300,
+        "base_hand_size": 1.0
     },
     "ui": {
         "theme": "dark",
@@ -25,7 +26,6 @@
             "Thumb Down": "volume_down",
             "Open Palm": "task_view",
             "Closed Fist": "show_desktop",
-            "Crossed Hands": "lock_pc",
             "Crossed Fingers": "lock_pc",
             "Call Me": "switch_mode"
         },
@@ -47,6 +47,11 @@
     },
     "calibration": {
         "hand_size_baseline": 1.0,
-        "pointer_extension_ratio": 0.4
+        "pointer_extension_ratio": 0.4,
+        "pinch_enter_threshold": 0.45,
+        "pinch_release_threshold": 0.6,
+        "two_finger_max_spacing": 0.2,
+        "victory_min_spacing": 0.35,
+        "active_roi_margin": 0.2
     }
 }

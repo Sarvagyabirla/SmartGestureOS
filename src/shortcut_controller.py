@@ -1,7 +1,7 @@
 import os
 import time
 import subprocess
-import pyautogui
+import keyboard
 from .logger import logger
 
 class ShortcutController:
@@ -10,12 +10,20 @@ class ShortcutController:
         
     def _open(self, cmd, cooldown=2.0):
         if time.time() - self.last_open_time > cooldown:
-            try:
-                subprocess.Popen(cmd, shell=True)
-                self.last_open_time = time.time()
-                logger.info(f"Executed shortcut: {cmd}")
-            except Exception as e:
-                logger.error(f"Failed to open shortcut {cmd}: {e}")
+            import shutil
+            executable = cmd.split()[0]
+            if executable.lower() not in ["start", "rundll32.exe"] and not shutil.which(executable):
+                raise FileNotFoundError(f"Command '{executable}' not found in PATH.")
+                
+            p = subprocess.Popen(cmd, shell=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            
+            time.sleep(0.1) # brief wait to catch immediate failures
+            if p.poll() is not None and p.returncode != 0:
+                err = p.stderr.read().decode('utf-8', errors='ignore').strip()
+                raise Exception(f"Launch failed: {err}")
+                
+            self.last_open_time = time.time()
+            logger.info(f"Executed shortcut: {cmd}")
                 
     def open_chrome(self):
         self._open("start chrome")
@@ -36,13 +44,13 @@ class ShortcutController:
         self._open("rundll32.exe user32.dll,LockWorkStation")
 
     def snap_left(self):
-        pyautogui.hotkey('win', 'left')
+        keyboard.send('windows+left')
 
     def snap_right(self):
-        pyautogui.hotkey('win', 'right')
+        keyboard.send('windows+right')
 
     def maximize(self):
-        pyautogui.hotkey('win', 'up')
+        keyboard.send('windows+up')
 
     def minimize(self):
-        pyautogui.hotkey('win', 'down')
+        keyboard.send('windows+down')

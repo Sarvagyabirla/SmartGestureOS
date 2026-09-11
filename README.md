@@ -15,7 +15,7 @@ Smart Gesture OS harnesses the power of OpenCV and Google's MediaPipe Hand Landm
 - **Enhanced Dashboard**: Real-time monitoring of FPS, Confidence, CPU, RAM, Camera State, Automation State, Voice Feedback, and Gesture History.
 
 ### Stability & Reliability
-This version of SmartGestureOS has been rigorously stabilized for live demonstration purposes. The codebase features robust error handling, automated camera recovery, asynchronous TTS feedback, and strict gesture validation tests. 
+This version of SmartGestureOS has been rigorously stabilized for live demonstration purposes. The codebase features robust error handling, automated camera recovery, asynchronous TTS feedback, and strict gesture validation tests.
 
 ## Running Tests
 To verify system stability, a pytest suite is included. Run the tests via:
@@ -68,7 +68,7 @@ SmartGestureOS/
 ├── main.py                    # Application entry point & thread orchestrator
 ├── config.py                  # Settings loader
 ├── GESTURES.md                # Strict 1-to-1 Gesture to Action mapping documentation
-├── settings.json              # Gesture mappings and configs
+├── profiles/                  # Configuration profiles (default.json)
 └── requirements.txt           # Python dependencies
 ```
 
@@ -93,7 +93,7 @@ Please refer to the [GESTURES.md](GESTURES.md) file for the complete, strict 1-t
 
 ## Troubleshooting
 
-- **No Camera Feed:** Ensure your camera is not being used by another application. Try changing `"index": 0` in `settings.json` to `1` or `2`.
+- **No Camera Feed:** Ensure your camera is not being used by another application. Try changing `"index": 0` in `profiles/default.json` to `1` or `2`.
 - **UI Lag / Low FPS:** Ensure you have adequate lighting. MediaPipe performs best with clear visibility of your hand.
 - **Volume Control Not Working:** `pycaw` requires Windows. Make sure your default audio device is active.
 - **"ModuleNotFoundError":** Ensure you've activated your virtual environment and installed all packages from `requirements.txt`.
@@ -108,6 +108,3 @@ Please refer to the [GESTURES.md](GESTURES.md) file for the complete, strict 1-t
 
 Contributions are welcome! Please open an issue or submit a pull request. Make sure to run `pytest tests/` before submitting code to ensure no regressions.
 
-## License
-
-MIT License. See `LICENSE` for more information.

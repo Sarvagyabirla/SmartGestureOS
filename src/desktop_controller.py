@@ -21,3 +21,15 @@ class DesktopController:
         
     def open_start(self):
         self._action("windows")
+        
+    def take_screenshot(self):
+        from src.paths import SCREENSHOTS_DIR
+        from PIL import ImageGrab
+        
+        filename = SCREENSHOTS_DIR / f"screen_{int(time.time())}.png"
+        try:
+            img = ImageGrab.grab(all_screens=True)
+            img.save(str(filename))
+        except Exception as e:
+            from .logger import logger
+            logger.error(f"Screenshot failed: {e}")

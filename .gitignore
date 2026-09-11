@@ -1,5 +1,6 @@
 # Virtual environments
 .venv/
+.conda/
 venv/
 env/
 
@@ -7,6 +8,7 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # IDE
 .vscode/
@@ -21,9 +23,21 @@ __pycache__/
 coverage/
 htmlcov/
 
-# Logs
+# Logs & temp
 *.log
 logs/
+temp/
+
+# Build artifacts
+build/
+dist/
+*.spec
+*.spec.old
+!packaging/windows/SmartGesture.spec
+
+# Data
+screenshots/
+benchmarks/
 
 # OS files
 .DS_Store

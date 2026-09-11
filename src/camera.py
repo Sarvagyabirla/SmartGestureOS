@@ -1,5 +1,6 @@
 import cv2
 import threading
+import queue
 from .logger import logger
 
 class Camera:
@@ -14,9 +15,8 @@ class Camera:
         self.thread = None
         self.is_connected = False
         
-        self.frame = None
+        self.frame_queue = queue.Queue(maxsize=1)
         self.frame_id = 0
-        self.lock = threading.Lock()
         
     def start(self):
         if self.running:
@@ -62,15 +62,20 @@ class Camera:
             failed_reads = 0
             frame = cv2.flip(frame, 1) # Mirror image for intuitive control
             
-            with self.lock:
-                self.frame = frame
-                self.frame_id += 1
+            if self.frame_queue.full():
+                try:
+                    self.frame_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                    
+            self.frame_queue.put((frame, self.frame_id))
+            self.frame_id += 1
                 
     def read(self):
-        with self.lock:
-            if self.frame is not None:
-                return self.frame.copy(), self.frame_id
-        return None, 0
+        try:
+            return self.frame_queue.get_nowait()
+        except queue.Empty:
+            return None, -1
         
     def stop(self):
         self.running = False

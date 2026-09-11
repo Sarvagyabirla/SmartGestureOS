@@ -56,7 +56,7 @@ This document outlines the strictly unique gesture mappings. Every single task i
 | 🤙 **Call Me** | Cycle Modes | Cycles between GENERAL, MEDIA, and DRAW modes. |
 
 ## Custom Gestures
-You can also train your own custom gestures using the Trainer Window in the application's UI. Once trained, custom gestures will be recognized automatically and can be mapped to any action in your `settings.json` file.
+You can also train your own custom gestures using the Trainer Window in the application's UI. Once trained, custom gestures will be recognized automatically and can be mapped to any action in your profile (e.g. `profiles/default.json`).
 
 ## Tips for Best Performance
 - Action gestures (like Opening Chrome, Changing Volume, etc.) require you to hold the pose steadily to execute.

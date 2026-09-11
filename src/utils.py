@@ -60,8 +60,8 @@ class PointSmoother:
         self.filter_y = None
 
 def get_distance(p1, p2):
-    """Returns distance between two points"""
-    return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+    """Returns distance between two points (2D or 3D)"""
+    return math.dist(p1, p2)
 
 def get_angle(p1, p2, p3):
     """Calculate angle between three points (p2 is vertex)"""

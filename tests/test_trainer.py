@@ -1,14 +1,16 @@
 import unittest
+import numpy as np
 import os
 import shutil
-import numpy as np
-from src.gesture_trainer import GestureTrainer, MODELS_DIR
+from src.gesture_trainer import GestureTrainer
+from src.paths import CUSTOM_GESTURES_DIR
 
 class TestGestureTrainer(unittest.TestCase):
     def setUp(self):
-        self.test_dir = MODELS_DIR.parent / "test_models"
-        self.test_dir.mkdir(parents=True, exist_ok=True)
         self.trainer = GestureTrainer()
+        self.test_dir = CUSTOM_GESTURES_DIR.parent / "test_models"
+        self.test_dir.mkdir(parents=True, exist_ok=True)
+        # override for tests
         self.trainer.models_dir = self.test_dir
         
     def tearDown(self):

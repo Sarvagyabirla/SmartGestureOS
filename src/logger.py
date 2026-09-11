@@ -1,10 +1,10 @@
 import logging
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from src.paths import LOGS_DIR
 
 def setup_logger():
-    log_dir = Path(__file__).resolve().parent.parent / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = LOGS_DIR
     log_file = log_dir / "smart_gesture_os.log"
 
     logger = logging.getLogger("SmartGestureOS")
