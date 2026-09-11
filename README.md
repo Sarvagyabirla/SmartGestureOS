@@ -15,7 +15,7 @@ Smart Gesture OS harnesses the power of OpenCV and Google's MediaPipe Hand Landm
 - **Enhanced Dashboard**: Real-time monitoring of FPS, Confidence, CPU, RAM, Camera State, Automation State, Voice Feedback, and Gesture History.
 
 ### Stability & Reliability
-This version of SmartGestureOS has been rigorously stabilized for live demonstration purposes. The codebase features robust error handling, automated camera recovery, asynchronous TTS feedback, and strict gesture validation tests. 
+This version of SmartGestureOS has been rigorously stabilized for live demonstration purposes. The codebase features robust error handling, automated camera recovery, asynchronous TTS feedback, and strict gesture validation tests.
 
 ## Running Tests
 To verify system stability, a pytest suite is included. Run the tests via:

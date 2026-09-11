@@ -21,7 +21,7 @@
 
 ## 5. Test Inventory
 - **Current Suite**: 31 test functions present in the latest ZIP.
-- **Hardware Coupling**: The camera test can accidentally touch real hardware during the ordinary CI suite. 
+- **Hardware Coupling**: The camera test can accidentally touch real hardware during the ordinary CI suite.
 - **UI Tests**: Test dependencies rely on real display/Tk instances, requiring headless isolation.
 
 ## 6. Known Runtime Issues
@@ -38,11 +38,11 @@
 - **Consensus & Temporality**: Classifier uses a weak 5-frame consensus (accepting 2/5).
 - **Fragmented Logic**: Temporal filtering/holding logic is spread across the classifier, `GestureHoldTimer`, and the mouse controller.
 - **Drawing Memory Bandwidth**: The drawing history clones the entire 1280x720 image instead of representing stroke objects.
-- **MediaPipe Timing**: `time.time()` is incorrectly used as the timestamp source for `LIVE_STREAM` async processing instead of a monotonically increasing clock. 
+- **MediaPipe Timing**: `time.time()` is incorrectly used as the timestamp source for `LIVE_STREAM` async processing instead of a monotonically increasing clock.
 - **Stale Frame Re-use**: Up to 150ms of stale landmarks are reused without verifying age.
 
 ## 9. Security Risks
 - **Command Execution**: `ShortcutController` uses `subprocess.Popen(..., shell=True)` (e.g., `start chrome`). This is highly fragile and presents a critical risk if a remote interface (Android) is exposed in the future.
 
 ## 10. Performance Risks
-- **Telemetry Errors**: The UI FPS counter reports the processing-loop iteration rate rather than actual capture, inference, and UI rendering speeds separately. 
+- **Telemetry Errors**: The UI FPS counter reports the processing-loop iteration rate rather than actual capture, inference, and UI rendering speeds separately.
