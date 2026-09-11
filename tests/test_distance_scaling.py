@@ -36,6 +36,7 @@ def create_mock_hand(scale=1.0, dy_offset=0.0):
 
 def test_distance_scaling():
     mc = MouseController()
+    from src.event_engine import EventState
     from config import SETTINGS
     if "gestures" not in SETTINGS:
         SETTINGS["gestures"] = {}
@@ -44,22 +45,22 @@ def test_distance_scaling():
     # 1. Normal hand
     h_normal_start = create_mock_hand(scale=1.0, dy_offset=0.0)
     mc.process_landmarks(h_normal_start, "Two Fingers", "Two Fingers", 1920, 1080)
-    assert mc.last_gesture == "Two Fingers"
-    assert pytest.approx(mc.scroll_start_y) == 0.3
+    assert mc.engine.state == EventState.SCROLLING
+    assert pytest.approx(mc.engine.scroll_start_y) == 0.3
     
     # move by 0.06 -> triggers scroll
     h_normal_move = create_mock_hand(scale=1.0, dy_offset=0.06)
     mc.process_landmarks(h_normal_move, "Two Fingers", "Two Fingers", 1920, 1080)
-    assert pytest.approx(mc.scroll_start_y) == 0.36
+    assert pytest.approx(mc.engine.scroll_start_y) == 0.36
     
-    mc.last_gesture = "None"
+    mc.engine.state = EventState.HOVER
     
     # 2. Far hand (half size)
     h_far_start = create_mock_hand(scale=0.5, dy_offset=0.0)
     mc.process_landmarks(h_far_start, "Two Fingers", "Two Fingers", 1920, 1080)
-    assert pytest.approx(mc.scroll_start_y) == 0.4
+    assert pytest.approx(mc.engine.scroll_start_y) == 0.4
     
     # move by 0.03 physical -> scales to 0.06 -> triggers scroll!
     h_far_move = create_mock_hand(scale=0.5, dy_offset=0.03)
     mc.process_landmarks(h_far_move, "Two Fingers", "Two Fingers", 1920, 1080)
-    assert pytest.approx(mc.scroll_start_y) == 0.43
+    assert pytest.approx(mc.engine.scroll_start_y) == 0.43

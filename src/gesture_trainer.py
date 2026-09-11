@@ -1,15 +1,12 @@
 import json
 import numpy as np
 from pathlib import Path
+from src.paths import CUSTOM_GESTURES_DIR
 from .logger import logger
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-MODELS_DIR = BASE_DIR / "models"
 
 class GestureTrainer:
     def __init__(self):
-        self.models_dir = MODELS_DIR
-        self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.models_dir = CUSTOM_GESTURES_DIR
         self.custom_gestures = {} # { "gesture_name": [normalized_vector_1, ...] }
         self.load_models()
         

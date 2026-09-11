@@ -108,6 +108,3 @@ Please refer to the [GESTURES.md](GESTURES.md) file for the complete, strict 1-t
 
 Contributions are welcome! Please open an issue or submit a pull request. Make sure to run `pytest tests/` before submitting code to ensure no regressions.
 
-## License
-
-MIT License. See `LICENSE` for more information.

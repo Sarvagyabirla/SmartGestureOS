@@ -43,6 +43,9 @@ class GestureClassifier:
         scores = []
         
         wrist = self.get_3d_point(lms_list[0])
+        middle_mcp = self.get_3d_point(lms_list[9])
+        hand_size = max(0.01, np.linalg.norm(wrist - middle_mcp))
+        margin = hand_size * 0.15 # 15% of hand size margin to prevent noise jitter
         
         # Thumb: compare distance of tip to pinky mcp vs thumb mcp to pinky mcp
         thumb_tip = self.get_3d_point(lms_list[4])
@@ -53,12 +56,12 @@ class GestureClassifier:
         d_mcp_pinky = np.linalg.norm(thumb_mcp - pinky_mcp)
         
         diff_thumb = d_tip_pinky - d_mcp_pinky
-        is_thumb_up = 1 if diff_thumb > 0 else 0
+        is_thumb_up = 1 if diff_thumb > margin else 0
         fingers.append(is_thumb_up)
         
-        s_thumb = min(100.0, max(0.0, (diff_thumb / 0.08) * 100.0))
+        s_thumb = min(100.0, max(0.0, (diff_thumb / (margin * 2)) * 100.0))
         if is_thumb_up == 0:
-            s_thumb = min(100.0, max(0.0, (-diff_thumb / 0.08) * 100.0))
+            s_thumb = min(100.0, max(0.0, (-diff_thumb / (margin * 2)) * 100.0))
         scores.append(s_thumb)
         
         # Other fingers: Check if tip is further from mcp than pip
@@ -71,12 +74,12 @@ class GestureClassifier:
             d_pip_mcp = np.linalg.norm(pip - mcp)
             
             diff = d_tip_mcp - d_pip_mcp
-            is_finger_up = 1 if diff > 0 else 0
+            is_finger_up = 1 if diff > margin else 0
             fingers.append(is_finger_up)
             
-            s = min(100.0, max(0.0, (diff / 0.05) * 100.0))
+            s = min(100.0, max(0.0, (diff / (margin * 2)) * 100.0))
             if is_finger_up == 0:
-                s = min(100.0, max(0.0, (-diff / 0.05) * 100.0))
+                s = min(100.0, max(0.0, (-diff / (margin * 2)) * 100.0))
             scores.append(s)
             
         return fingers, scores

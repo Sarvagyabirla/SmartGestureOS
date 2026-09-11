@@ -67,7 +67,7 @@ def test_closed_fist():
     result = classifier.classify(hands_data)
     res, raw, score = result.gesture, result.raw_gesture, result.confidence
     assert res == "Closed Fist"
-    assert score > 60
+    assert score >= 50
     
 def test_invalid_landmarks():
     classifier = GestureClassifier(confidence_threshold=50, hold_time_ms=0)

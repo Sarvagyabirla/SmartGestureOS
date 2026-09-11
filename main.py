@@ -123,6 +123,7 @@ class MainApp:
         last_frame_id = -1
         last_inference_time = 0
         inference_interval = 1.0 / 30.0 # Max 30 FPS for ML inference
+        pending_frames = {}
         
         while self.running:
             loop_start = time.time()
@@ -145,7 +146,6 @@ class MainApp:
                 if frame is not None and frame_id != last_frame_id:
                     last_frame_id = frame_id
                     
-                    # 1. Send frame to ML model asynchronously
                     current_time = time.time()
                     # Throttle to 5 FPS if sleeping to save massive CPU, otherwise max 30 FPS
                     inference_interval = 1.0 / 5.0 if self.mapper.is_sleeping else 1.0 / 30.0
@@ -153,38 +153,51 @@ class MainApp:
                     if current_time - last_inference_time >= inference_interval:
                         timestamp_ms = int(current_time * 1000)
                         small_frame = cv2.resize(frame, (640, 360))
+                        pending_frames[timestamp_ms] = frame.copy()
                         self.detector.detect_async(small_frame, timestamp_ms)
                         last_inference_time = current_time
                     
-                    # 2. Get latest ML result (which may be slightly delayed)
-                    hands_data = self.detector.get_all_hands_data(frame.shape)
+                    result_ts, results = None, None
                     
-                    # Draw landmarks on current frame
-                    results = self.detector.get_latest_results()
-                    if results and results.hand_landmarks:
-                        for hand_lms in results.hand_landmarks:
-                            self.detector.draw_landmarks(frame, hand_lms)
-                    
-                    result = self.classifier.classify(hands_data)
-                    stable_gesture, raw_gesture, confidence = result.gesture, result.raw_gesture, int(result.confidence)
-                    frame, action, progress = self.mapper.process(hands_data, stable_gesture, raw_gesture, frame)
-                    frame = self.draw_overlays(frame, hands_data, progress)
-                    
-                    time_diff = time.time() - loop_start
-                    current_fps = (1 / time_diff) if time_diff > 0 else 60
-                    self.fps_history.append(current_fps)
-                    fps = int(sum(self.fps_history) / len(self.fps_history))
-                    
-                    # Update queue with latest frame and stats
-                    if not self.frame_queue.full():
-                        self.frame_queue.put((frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
-                    else:
-                        # Clear old frame to keep it real-time
-                        try:
-                            self.frame_queue.get_nowait()
-                            self.frame_queue.put_nowait((frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
-                        except queue.Empty:
-                            pass
+                    # Drain the queue to get the newest available result
+                    while not self.detector.results_queue.empty():
+                        result_ts, results = self.detector.results_queue.get_nowait()
+                        
+                    if result_ts is not None and result_ts in pending_frames:
+                        matched_frame = pending_frames.pop(result_ts)
+                        
+                        # Clean up older pending frames to prevent memory leaks
+                        old_keys = [k for k in pending_frames.keys() if k < result_ts]
+                        for k in old_keys:
+                            del pending_frames[k]
+                            
+                        # Process matched_frame
+                        hands_data = self.detector.get_all_hands_data(results, matched_frame.shape)
+                        
+                        if results and results.hand_landmarks:
+                            for hand_lms in results.hand_landmarks:
+                                self.detector.draw_landmarks(matched_frame, hand_lms)
+                        
+                        result_obj = self.classifier.classify(hands_data)
+                        stable_gesture, raw_gesture, confidence = result_obj.gesture, result_obj.raw_gesture, int(result_obj.confidence)
+                        matched_frame, action, progress = self.mapper.process(hands_data, stable_gesture, raw_gesture, matched_frame)
+                        matched_frame = self.draw_overlays(matched_frame, hands_data, progress)
+                        
+                        time_diff = time.time() - loop_start
+                        current_fps = (1 / time_diff) if time_diff > 0 else 60
+                        self.fps_history.append(current_fps)
+                        fps = int(sum(self.fps_history) / len(self.fps_history))
+                        
+                        # Update queue with latest frame and stats
+                        if not self.frame_queue.full():
+                            self.frame_queue.put((matched_frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
+                        else:
+                            # Clear old frame to keep it real-time
+                            try:
+                                self.frame_queue.get_nowait()
+                                self.frame_queue.put_nowait((matched_frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
+                            except queue.Empty:
+                                pass
                             
             except Exception as e:
                 logger.error(f"Error in processing loop: {e}")

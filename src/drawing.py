@@ -89,11 +89,10 @@ class DrawingCanvas:
             self.canvas = self.redo_stack.pop()
             
     def save_image(self):
-        if not os.path.exists("screenshots"):
-            os.makedirs("screenshots")
-        filename = f"screenshots/drawing_{int(time.time())}.png"
-        cv2.imwrite(filename, self.canvas)
-        return filename
+        from src.paths import DRAWINGS_DIR
+        filename = DRAWINGS_DIR / f"drawing_{int(time.time())}.png"
+        cv2.imwrite(str(filename), self.canvas)
+        return str(filename)
         
     def get_overlay(self, frame):
         gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)

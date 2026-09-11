@@ -33,6 +33,7 @@ build/
 dist/
 *.spec
 *.spec.old
+!packaging/windows/SmartGesture.spec
 
 # Data
 screenshots/

@@ -41,8 +41,17 @@ def main():
                 continue
                 
             # Synchronous detection for benchmark to ensure 1:1 frame-result mapping
-            results = detector.hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-            hands_data = detector._parse_results(results, frame.shape)
+            timestamp_ms = int(time.time() * 1000)
+            detector.detect_async(frame, timestamp_ms)
+            
+            # Wait briefly for result in queue since benchmark is synchronous-ish
+            try:
+                import queue
+                result_ts, results = detector.results_queue.get(timeout=0.1)
+            except queue.Empty:
+                results = None
+                
+            hands_data = detector.get_all_hands_data(results, frame.shape)
             
             distance_cm = -1
             confidence = 0

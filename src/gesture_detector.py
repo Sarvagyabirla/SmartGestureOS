@@ -12,13 +12,14 @@ from .models import Landmark
 
 class GestureDetector:
     def __init__(self, max_hands=2, detection_con=0.8, tracking_con=0.8):
-        self.results = None
-        self.last_valid_results = None
-        self.last_valid_time = 0
+        import queue
+        self.results_queue = queue.Queue(maxsize=30)
         self.lock = threading.Lock()
         
         try:
-            base_options = python.BaseOptions(model_asset_path='models/hand_landmarker.task')
+            from src.paths import RESOURCE_DIR
+            model_path = str(RESOURCE_DIR / 'models' / 'hand_landmarker.task')
+            base_options = python.BaseOptions(model_asset_path=model_path)
             options = vision.HandLandmarkerOptions(
                 base_options=base_options,
                 running_mode=vision.RunningMode.LIVE_STREAM,
@@ -35,11 +36,15 @@ class GestureDetector:
             self.detector = None
             
     def _result_callback(self, result: vision.HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
-        with self.lock:
-            self.results = result
-            if result and result.hand_landmarks:
-                self.last_valid_results = result
-                self.last_valid_time = time.time()
+        try:
+            if self.results_queue.full():
+                try:
+                    self.results_queue.get_nowait()
+                except queue.Empty:
+                    pass
+            self.results_queue.put_nowait((timestamp_ms, result))
+        except Exception as e:
+            logger.error(f"Error in result callback: {e}")
             
     def detect_async(self, img, timestamp_ms):
         if not self.detector:
@@ -54,15 +59,7 @@ class GestureDetector:
         except Exception as e:
             logger.error(f"Error in async detection: {e}")
             
-    def get_latest_results(self):
-        with self.lock:
-            now = time.time()
-            # Landmark loss recovery (allow up to 150ms of missing data to reuse old data)
-            if self.results and self.results.hand_landmarks:
-                return self.results
-            elif self.last_valid_results and (now - self.last_valid_time < 0.15):
-                return self.last_valid_results
-            return None
+    # get_latest_results is removed as results are now fetched from the queue
             
     def draw_landmarks(self, img, landmarks):
         h, w, _ = img.shape
@@ -89,9 +86,8 @@ class GestureDetector:
             cv2.circle(img, (cx, cy), 5, (255, 255, 50), -1)  # Cyan outer ring (BGR)
             cv2.circle(img, (cx, cy), 2, (255, 255, 255), -1) # White center
 
-    def get_all_hands_data(self, img_shape):
+    def get_all_hands_data(self, results, img_shape):
         hands_data = []
-        results = self.get_latest_results()
         
         if results and results.hand_landmarks:
             h, w, _ = img_shape

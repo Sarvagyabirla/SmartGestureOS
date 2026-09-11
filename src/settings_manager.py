@@ -1,14 +1,11 @@
 import json
 import shutil
 from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-PROFILES_DIR = BASE_DIR / "profiles"
+from src.paths import RESOURCE_DIR, PROFILES_DIR
 
 class SettingsManager:
     def __init__(self):
         self.profiles_dir = PROFILES_DIR
-        self.profiles_dir.mkdir(parents=True, exist_ok=True)
         self.current_profile = "default"
         self.settings = {}
         self.callbacks = []
@@ -27,7 +24,7 @@ class SettingsManager:
                 logging.error(f"Error in settings callback: {e}")
         
     def _get_default_settings(self):
-        defaults_path = BASE_DIR / "config" / "defaults.json"
+        defaults_path = RESOURCE_DIR / "config" / "defaults.json"
         if defaults_path.exists():
             try:
                 with open(defaults_path, "r") as f:
