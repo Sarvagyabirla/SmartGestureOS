@@ -7,27 +7,27 @@ def create_base_two_fingers():
     # Base "Two Fingers" gesture (index and middle extended, others closed)
     # y = 0 is top, y = 1 is bottom
     return [
-        Landmark(0, 500, 500, 0.5, 0.8, 0.0), # wrist
-        Landmark(1, 400, 500, 0.4, 0.7, 0.0), # thumb
-        Landmark(2, 300, 500, 0.3, 0.7, 0.0),
-        Landmark(3, 300, 500, 0.3, 0.6, 0.0),
-        Landmark(4, 400, 500, 0.4, 0.6, 0.0), # thumb tip
-        Landmark(5, 450, 500, 0.45, 0.5, 0.0), # index mcp
-        Landmark(6, 450, 500, 0.45, 0.4, 0.0), 
-        Landmark(7, 450, 500, 0.45, 0.3, 0.0),
-        Landmark(8, 450, 500, 0.45, 0.2, 0.0), # index tip
-        Landmark(9, 500, 500, 0.5, 0.5, 0.0), # middle mcp
-        Landmark(10, 500, 500, 0.5, 0.4, 0.0),
-        Landmark(11, 500, 500, 0.5, 0.3, 0.0),
-        Landmark(12, 500, 500, 0.5, 0.2, 0.0), # middle tip
-        Landmark(13, 650, 500, 0.65, 0.5, 0.0), # ring mcp
-        Landmark(14, 650, 500, 0.65, 0.6, 0.0),
-        Landmark(15, 650, 500, 0.65, 0.55, 0.0),
-        Landmark(16, 650, 500, 0.65, 0.5, 0.0), # ring tip (folded)
-        Landmark(17, 750, 500, 0.75, 0.5, 0.0), # pinky mcp
-        Landmark(18, 750, 500, 0.75, 0.6, 0.0),
-        Landmark(19, 750, 500, 0.75, 0.55, 0.0),
-        Landmark(20, 750, 500, 0.75, 0.5, 0.0)  # pinky tip (folded)
+        Landmark(id=0, pixel_x=500, pixel_y=500, x=0.5, y=0.8, z=0.0), # wrist
+        Landmark(id=1, pixel_x=400, pixel_y=500, x=0.4, y=0.7, z=0.0), # thumb
+        Landmark(id=2, pixel_x=300, pixel_y=500, x=0.3, y=0.7, z=0.0),
+        Landmark(id=3, pixel_x=300, pixel_y=500, x=0.3, y=0.6, z=0.0),
+        Landmark(id=4, pixel_x=400, pixel_y=500, x=0.4, y=0.6, z=0.0), # thumb tip
+        Landmark(id=5, pixel_x=450, pixel_y=500, x=0.45, y=0.5, z=0.0), # index mcp
+        Landmark(id=6, pixel_x=450, pixel_y=500, x=0.45, y=0.4, z=0.0), 
+        Landmark(id=7, pixel_x=450, pixel_y=500, x=0.45, y=0.3, z=0.0),
+        Landmark(id=8, pixel_x=450, pixel_y=500, x=0.45, y=0.2, z=0.0), # index tip
+        Landmark(id=9, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0), # middle mcp
+        Landmark(id=10, pixel_x=500, pixel_y=500, x=0.5, y=0.4, z=0.0),
+        Landmark(id=11, pixel_x=500, pixel_y=500, x=0.5, y=0.3, z=0.0),
+        Landmark(id=12, pixel_x=500, pixel_y=500, x=0.5, y=0.2, z=0.0), # middle tip
+        Landmark(id=13, pixel_x=650, pixel_y=500, x=0.65, y=0.5, z=0.0), # ring mcp
+        Landmark(id=14, pixel_x=650, pixel_y=500, x=0.65, y=0.6, z=0.0),
+        Landmark(id=15, pixel_x=650, pixel_y=500, x=0.65, y=0.55, z=0.0),
+        Landmark(id=16, pixel_x=650, pixel_y=500, x=0.65, y=0.5, z=0.0), # ring tip (folded)
+        Landmark(id=17, pixel_x=750, pixel_y=500, x=0.75, y=0.5, z=0.0), # pinky mcp
+        Landmark(id=18, pixel_x=750, pixel_y=500, x=0.75, y=0.6, z=0.0),
+        Landmark(id=19, pixel_x=750, pixel_y=500, x=0.75, y=0.55, z=0.0),
+        Landmark(id=20, pixel_x=750, pixel_y=500, x=0.75, y=0.5, z=0.0)  # pinky tip (folded)
     ]
 
 def add_noise(landmarks, noise_level=0.02):

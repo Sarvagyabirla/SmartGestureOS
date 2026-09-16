@@ -88,11 +88,15 @@ class DrawingCanvas:
             self.undo_stack.append(self.canvas.copy())
             self.canvas = self.redo_stack.pop()
             
-    def save_image(self):
+    def save_image(self) -> 'ActionResult':
         from src.paths import DRAWINGS_DIR
+        from src.models import ActionResult
         filename = DRAWINGS_DIR / f"drawing_{int(time.time())}.png"
-        cv2.imwrite(str(filename), self.canvas)
-        return str(filename)
+        success = cv2.imwrite(str(filename), self.canvas)
+        if success and os.path.exists(str(filename)):
+            return ActionResult(True, "save_drawing", f"Saved {filename.name}", None, time.time())
+        else:
+            return ActionResult(False, "save_drawing", "Failed to save drawing", "cv2.imwrite failed or file missing", time.time())
         
     def get_overlay(self, frame):
         gray = cv2.cvtColor(self.canvas, cv2.COLOR_BGR2GRAY)

@@ -1,5 +1,6 @@
 import ctypes
 from ctypes import wintypes
+import time
 from .logger import logger
 
 class PhysicalMonitor(ctypes.Structure):
@@ -8,8 +9,11 @@ class PhysicalMonitor(ctypes.Structure):
 
 class BrightnessController:
     def __init__(self):
-        self.current = 50
+        self.current = 50.0
         self.last_applied = int(self.current)
+        self.last_api_call = 0.0
+        self.api_rate_limit = 0.1 # Max 10 calls per second
+        
         try:
             self.user32 = ctypes.windll.user32
             self.dxva2 = ctypes.windll.dxva2
@@ -21,6 +25,11 @@ class BrightnessController:
     def _set_brightness_api(self, level):
         if not self.user32 or not self.dxva2:
             return
+            
+        now = time.perf_counter()
+        if now - self.last_api_call < self.api_rate_limit:
+            return
+        self.last_api_call = now
             
         try:
             # 2 = MONITOR_DEFAULTTONEAREST
@@ -35,8 +44,18 @@ class BrightnessController:
         except Exception as e:
             logger.error(f"Failed to set brightness via API: {e}")
 
-    def set_absolute_brightness(self, target_brightness):
-        target_brightness = max(0, min(100, target_brightness))
+    def set_brightness_from_y(self, normalized_y):
+        """Map normalized_y (0.0 to 1.0) to brightness (20% to 80% or 0% to 100%)
+           where top of screen (0.2) = 100%, bottom (0.8) = 0%.
+        """
+        # Clamp between 0.2 and 0.8
+        y_clamped = max(0.2, min(0.8, normalized_y))
+        
+        # Invert and scale to 0-100 range
+        # y=0.2 -> (0.8 - 0.2)/0.6 = 1.0 -> 100%
+        # y=0.8 -> (0.8 - 0.8)/0.6 = 0.0 -> 0%
+        target_brightness = ((0.8 - y_clamped) / 0.6) * 100.0
+        
         self.current = self.current + (target_brightness - self.current) * 0.2
         brightness = int(self.current)
         

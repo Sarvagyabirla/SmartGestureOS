@@ -122,11 +122,22 @@ class MainApp:
     def processing_loop(self):
         last_frame_id = -1
         last_inference_time = 0
-        inference_interval = 1.0 / 30.0 # Max 30 FPS for ML inference
-        pending_frames = {}
+        inference_interval = 1.0 / 30.0
+        
+        # Telemetry
+        self.fps_history = collections.deque(maxlen=30)
+        self.latency_history = collections.deque(maxlen=30)
+        
+        # Latest results state
+        latest_hands_data = None
+        latest_stable_gesture = "Unknown"
+        latest_raw_gesture = "Unknown"
+        latest_confidence = 0
+        latest_action = None
+        latest_progress = 0.0
 
         while self.running:
-            loop_start = time.time()
+            loop_start = time.perf_counter()
             try:
                 frame, frame_id = self.camera.read()
 
@@ -137,7 +148,7 @@ class MainApp:
                     try:
                         if self.frame_queue.full():
                             self.frame_queue.get_nowait()
-                        self.frame_queue.put_nowait((frame, [], self.mapper.mode, "Unknown", 0, None, 0, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
+                        self.frame_queue.put_nowait((frame, [], self.mapper.mode, "Unknown", "Unknown", 0, None, 0, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, 0))
                     except queue.Empty:
                         pass
                     time.sleep(0.1)
@@ -145,65 +156,77 @@ class MainApp:
 
                 if frame is not None and frame_id != last_frame_id:
                     last_frame_id = frame_id
-
-                    current_time = time.time()
-                    # Throttle to 5 FPS if sleeping to save massive CPU, otherwise max 30 FPS
+                    current_time = time.perf_counter()
+                    
                     inference_interval = 1.0 / 5.0 if self.mapper.is_sleeping else 1.0 / 30.0
 
+                    # 1. Send frame to async ML if ready
                     if current_time - last_inference_time >= inference_interval:
                         timestamp_ms = int(current_time * 1000)
                         small_frame = cv2.resize(frame, (640, 360))
-                        pending_frames[timestamp_ms] = frame.copy()
                         self.detector.detect_async(small_frame, timestamp_ms)
                         last_inference_time = current_time
 
+                    # 2. Check for new ML results
                     result_ts, results = None, None
-
-                    # Drain the queue to get the newest available result
                     while not self.detector.results_queue.empty():
                         result_ts, results = self.detector.results_queue.get_nowait()
 
-                    if result_ts is not None and result_ts in pending_frames:
-                        matched_frame = pending_frames.pop(result_ts)
+                    if result_ts is not None:
+                        latency_ms = int(time.perf_counter() * 1000) - result_ts
+                        self.latency_history.append(latency_ms)
+                        
+                        latest_hands_data = self.detector.get_all_hands_data(results, frame.shape)
+                        
+                        # Process logic with the new results
+                        result_obj = self.classifier.classify(latest_hands_data)
+                        latest_stable_gesture = result_obj.gesture
+                        latest_raw_gesture = result_obj.raw_gesture
+                        latest_confidence = int(result_obj.confidence)
+                        
+                    # 3. Always apply mapper (for continuous tracking like mouse move) and draw on CURRENT frame
+                    display_frame = frame.copy() # One copy for display safety if drawing
+                    
+                    if latest_hands_data:
+                        # Draw landmarks
+                        for hand_data in latest_hands_data:
+                            # Reconstruct mediapipe landmarks for drawing if needed, or just use our data
+                            # Since we just want the visual, we can rely on our parsed data
+                            h1 = hand_data['landmarks']
+                            for i in range(21):
+                                cv2.circle(display_frame, (h1[i].pixel_x, h1[i].pixel_y), 2, (0, 0, 255), -1)
+                        
+                        # Process Mapper
+                        display_frame, latest_action, latest_progress = self.mapper.process(
+                            latest_hands_data, latest_stable_gesture, latest_raw_gesture, display_frame
+                        )
+                        display_frame = self.draw_overlays(display_frame, latest_hands_data, latest_progress)
+                    else:
+                        # Process empty data to trigger HAND_LOST
+                        display_frame, latest_action, latest_progress = self.mapper.process(
+                            [], "None", "None", display_frame
+                        )
 
-                        # Clean up older pending frames to prevent memory leaks
-                        old_keys = [k for k in pending_frames.keys() if k < result_ts]
-                        for k in old_keys:
-                            del pending_frames[k]
+                    # Telemetry calculation
+                    time_diff = time.perf_counter() - loop_start
+                    current_fps = (1 / time_diff) if time_diff > 0 else 60
+                    self.fps_history.append(current_fps)
+                    fps = int(sum(self.fps_history) / len(self.fps_history))
+                    avg_latency = int(sum(self.latency_history) / len(self.latency_history)) if self.latency_history else 0
 
-                        # Process matched_frame
-                        hands_data = self.detector.get_all_hands_data(results, matched_frame.shape)
-
-                        if results and results.hand_landmarks:
-                            for hand_lms in results.hand_landmarks:
-                                self.detector.draw_landmarks(matched_frame, hand_lms)
-
-                        result_obj = self.classifier.classify(hands_data)
-                        stable_gesture, raw_gesture, confidence = result_obj.gesture, result_obj.raw_gesture, int(result_obj.confidence)
-                        matched_frame, action, progress = self.mapper.process(hands_data, stable_gesture, raw_gesture, matched_frame)
-                        matched_frame = self.draw_overlays(matched_frame, hands_data, progress)
-
-                        time_diff = time.time() - loop_start
-                        current_fps = (1 / time_diff) if time_diff > 0 else 60
-                        self.fps_history.append(current_fps)
-                        fps = int(sum(self.fps_history) / len(self.fps_history))
-
-                        # Update queue with latest frame and stats
-                        if not self.frame_queue.full():
-                            self.frame_queue.put((matched_frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
-                        else:
-                            # Clear old frame to keep it real-time
-                            try:
-                                self.frame_queue.get_nowait()
-                                self.frame_queue.put_nowait((matched_frame, hands_data, self.mapper.mode, stable_gesture, confidence, action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping))
-                            except queue.Empty:
-                                pass
+                    if not self.frame_queue.full():
+                        self.frame_queue.put((display_frame, latest_hands_data, self.mapper.mode, latest_stable_gesture, latest_raw_gesture, latest_confidence, latest_action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, avg_latency))
+                    else:
+                        try:
+                            self.frame_queue.get_nowait()
+                            self.frame_queue.put_nowait((display_frame, latest_hands_data, self.mapper.mode, latest_stable_gesture, latest_raw_gesture, latest_confidence, latest_action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, avg_latency))
+                        except queue.Empty:
+                            pass
 
             except Exception as e:
                 logger.error(f"Error in processing loop: {e}")
 
-            # Pace loop to 60 FPS (16.6ms per frame)
-            elapsed = time.time() - loop_start
+            elapsed = time.perf_counter() - loop_start
             sleep_time = (1.0 / 60.0) - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -214,9 +237,9 @@ class MainApp:
 
         try:
             if not self.frame_queue.empty():
-                frame, hands_data, mode, gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping = self.frame_queue.get_nowait()
+                frame, hands_data, mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping, avg_latency = self.frame_queue.get_nowait()
                 self.ui.current_hands_data = hands_data  # Store for trainer window
-                self.ui.update_dashboard(mode, gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping)
+                self.ui.update_dashboard(mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping, avg_latency)
                 self.ui.update_frame(frame)
         except Exception as e:
             logger.error(f"Error in UI update loop: {e}")

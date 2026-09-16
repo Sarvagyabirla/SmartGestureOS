@@ -11,27 +11,27 @@ def create_mock_hand(scale=1.0, dy_offset=0.0):
         return base + (val - base) * scale
         
     return [
-        Landmark(0, 500, 500, 0.5, 0.5, 0.0), # wrist 0
-        Landmark(1, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(2, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(3, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(4, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(5, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(6, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(7, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(8, 500, 500, s(0.5), s(0.3) + dy_offset, 0.0), # index tip 8
-        Landmark(9, 500, 500, s(0.5), s(0.4), 0.0), # middle mcp 9
-        Landmark(10, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(11, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(12, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(13, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(14, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(15, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(16, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(17, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(18, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(19, 500, 500, 0.5, 0.5, 0.0),
-        Landmark(20, 500, 500, 0.5, 0.5, 0.0),
+        Landmark(id=0, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0), # wrist 0
+        Landmark(id=1, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=2, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=3, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=4, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=5, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=6, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=7, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=8, pixel_x=500, pixel_y=500, x=s(0.5), y=s(0.3) + dy_offset, z=0.0), # index tip 8
+        Landmark(id=9, pixel_x=500, pixel_y=500, x=s(0.5), y=s(0.4), z=0.0), # middle mcp 9
+        Landmark(id=10, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=11, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=12, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=13, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=14, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=15, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=16, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=17, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=18, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=19, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
+        Landmark(id=20, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
     ]
 
 def test_distance_scaling():

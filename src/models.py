@@ -1,16 +1,17 @@
 from dataclasses import dataclass
+from typing import Optional
 
 @dataclass
 class Landmark:
     id: int
-    pixel_x: int
-    pixel_y: int
     x: float
     y: float
     z: float
-    world_x: float = 0.0
-    world_y: float = 0.0
-    world_z: float = 0.0
+    pixel_x: int
+    pixel_y: int
+    world_x: Optional[float] = None
+    world_y: Optional[float] = None
+    world_z: Optional[float] = None
 
 @dataclass
 class GestureResult:
@@ -19,3 +20,11 @@ class GestureResult:
     confidence: float
     stability: float
     reason: str = ""
+
+@dataclass
+class ActionResult:
+    success: bool
+    action: str
+    message: str
+    error: Optional[str] = None
+    timestamp: Optional[float] = None

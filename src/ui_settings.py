@@ -35,8 +35,8 @@ class CalibrationWizard(ctk.CTkToplevel):
         import numpy as np
         h1 = hands_data[0]
         lms = h1['landmarks']
-        wrist = np.array([lms[0]['x'], lms[0]['y'], lms[0]['z']])
-        middle_mcp = np.array([lms[9]['x'], lms[9]['y'], lms[9]['z']])
+        wrist = np.array([lms[0].x, lms[0].y, lms[0].z])
+        middle_mcp = np.array([lms[9].x, lms[9].y, lms[9].z])
         hand_size = np.linalg.norm(wrist - middle_mcp)
         
         settings_manager.settings["gestures"]["base_hand_size"] = float(hand_size)

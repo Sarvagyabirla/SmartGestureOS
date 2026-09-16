@@ -70,10 +70,11 @@ class SmartGestureApp(ctk.CTk):
             return frame, lbl_val
             
         _, self.mode_label = create_card(1, "CURRENT MODE", "INITIALIZING...", value_font, self.accent_color)
-        _, self.gesture_label = create_card(2, "DETECTED GESTURE", "None", value_font, self.text_color)
+        _, self.raw_gesture_label = create_card(2, "RAW GESTURE", "None", value_font, self.muted_text)
+        _, self.gesture_label = create_card(3, "STABLE GESTURE", "None", value_font, self.text_color)
         
         self.conf_frame = ctk.CTkFrame(self.sidebar, fg_color=self.bg_color, corner_radius=8)
-        self.conf_frame.grid(row=3, column=0, padx=20, pady=8, sticky="ew")
+        self.conf_frame.grid(row=4, column=0, padx=20, pady=8, sticky="ew")
         self.conf_label = ctk.CTkLabel(self.conf_frame, text="Confidence: 0%", font=small_font, text_color=self.muted_text)
         self.conf_label.pack(anchor="w", padx=15, pady=(10, 0))
         self.confidence_bar = ctk.CTkProgressBar(self.conf_frame, height=8, corner_radius=4, fg_color=self.card_color)
@@ -82,9 +83,11 @@ class SmartGestureApp(ctk.CTk):
         
         # Stats panel
         self.stats_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.stats_frame.grid(row=4, column=0, padx=20, pady=10, sticky="ew")
+        self.stats_frame.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
         self.fps_label = ctk.CTkLabel(self.stats_frame, text="FPS: 0", font=normal_font, text_color=self.muted_text)
         self.fps_label.pack(side="left", expand=True)
+        self.latency_label = ctk.CTkLabel(self.stats_frame, text="LAT: 0ms", font=normal_font, text_color=self.muted_text)
+        self.latency_label.pack(side="left", expand=True)
         self.cpu_label = ctk.CTkLabel(self.stats_frame, text="CPU: 0%", font=normal_font, text_color=self.muted_text)
         self.cpu_label.pack(side="left", expand=True)
         self.ram_label = ctk.CTkLabel(self.stats_frame, text="RAM: 0 MB", font=normal_font, text_color=self.muted_text)
@@ -92,7 +95,7 @@ class SmartGestureApp(ctk.CTk):
         
         # Action Buttons
         self.btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.btn_frame.grid(row=7, column=0, padx=20, pady=10, sticky="ew")
+        self.btn_frame.grid(row=8, column=0, padx=20, pady=10, sticky="ew")
         self.settings_btn = ctk.CTkButton(self.btn_frame, text="Settings", command=self.open_settings, fg_color=self.bg_color, hover_color="#333333")
         self.settings_btn.pack(fill="x", pady=4)
         self.train_btn = ctk.CTkButton(self.btn_frame, text="Train Custom Gesture", command=self.open_trainer, fg_color=self.bg_color, hover_color="#333333")
@@ -100,18 +103,18 @@ class SmartGestureApp(ctk.CTk):
         self.coach_btn = ctk.CTkButton(self.btn_frame, text="Gesture Coach", command=self.open_coach, fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4")
         self.coach_btn.pack(fill="x", pady=4)
         
-        self.sidebar.grid_rowconfigure(10, weight=1)
+        self.sidebar.grid_rowconfigure(11, weight=1)
         
         # Status indicators
         self.camera_state_label = ctk.CTkLabel(self.sidebar, text="● CAMERA ACTIVE", font=small_font, text_color=self.accent_color)
-        self.camera_state_label.grid(row=11, column=0, padx=24, pady=(10, 2), sticky="w")
+        self.camera_state_label.grid(row=12, column=0, padx=24, pady=(10, 2), sticky="w")
         self.automation_state_label = ctk.CTkLabel(self.sidebar, text="● AUTOMATION ON", font=small_font, text_color=self.accent_color)
-        self.automation_state_label.grid(row=12, column=0, padx=24, pady=2, sticky="w")
+        self.automation_state_label.grid(row=13, column=0, padx=24, pady=2, sticky="w")
         
         self.history_label_title = ctk.CTkLabel(self.sidebar, text="RECENT ACTIONS", font=small_font, text_color=self.muted_text)
-        self.history_label_title.grid(row=13, column=0, padx=24, pady=(15, 0), sticky="w")
+        self.history_label_title.grid(row=14, column=0, padx=24, pady=(15, 0), sticky="w")
         self.history_textbox = ctk.CTkTextbox(self.sidebar, height=100, state="disabled", font=small_font, fg_color=self.bg_color, corner_radius=8)
-        self.history_textbox.grid(row=14, column=0, padx=20, pady=(5, 20), sticky="ew")
+        self.history_textbox.grid(row=15, column=0, padx=20, pady=(5, 20), sticky="ew")
         
         self.action_history = deque(maxlen=8)
         
@@ -173,7 +176,7 @@ class SmartGestureApp(ctk.CTk):
         self.history_textbox.insert("0.0", "\n".join(reversed(self.action_history)))
         self.history_textbox.configure(state="disabled")
         
-    def update_dashboard(self, mode, gesture, confidence, action, fps, cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False):
+    def update_dashboard(self, mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False, avg_latency=0):
         # Dynamic mode colors
         mode_colors = {
             "GENERAL": "#3a7ebf", # Blue
@@ -193,7 +196,8 @@ class SmartGestureApp(ctk.CTk):
             
         self.confidence_bar.configure(progress_color=bar_color)
         
-        self.gesture_label.configure(text=gesture)
+        self.gesture_label.configure(text=stable_gesture)
+        self.raw_gesture_label.configure(text=raw_gesture)
         self.conf_label.configure(text=f"Confidence: {confidence}%")
         
         # Smooth confidence bar animation
@@ -206,6 +210,7 @@ class SmartGestureApp(ctk.CTk):
         current_time = time.time()
         if current_time - self.last_stat_update > 0.5:
             self.fps_label.configure(text=f"FPS: {fps}")
+            self.latency_label.configure(text=f"LAT: {avg_latency}ms")
             self.cpu_label.configure(text=f"CPU: {cpu_usage:.1f}%")
             self.ram_label.configure(text=f"RAM: {ram_usage:.1f} MB")
             self.last_stat_update = current_time

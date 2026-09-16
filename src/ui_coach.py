@@ -20,7 +20,7 @@ class CoachUI(ctk.CTkToplevel):
         self.gesture_var = ctk.StringVar(value="Pinch")
         self.dropdown = ctk.CTkOptionMenu(
             self, 
-            values=["Pinch", "Open Palm", "Closed Fist", "Two Fingers", "Three Fingers", "Victory", "Rock On"], 
+            values=["Pinch", "Open Palm", "Closed Fist", "Two Fingers", "Three Fingers", "Victory (Peace)", "Rock On", "Call Me", "Crossed Fingers", "Middle Finger", "Thumbs Up", "Thumbs Down", "Pointing"], 
             variable=self.gesture_var,
             command=self.update_instructions
         )
@@ -37,8 +37,14 @@ class CoachUI(ctk.CTkToplevel):
             "Closed Fist": "Curl all your fingers tightly into your palm.",
             "Two Fingers": "Extend your index and middle fingers, keeping them close together.",
             "Three Fingers": "Extend your index, middle, and ring fingers.",
-            "Victory": "Extend your index and middle fingers, spreading them wide in a 'V' shape.",
-            "Rock On": "Extend your index and pinky fingers while curling the others."
+            "Victory (Peace)": "Extend your index and middle fingers, spreading them wide in a 'V' shape.",
+            "Rock On": "Extend your index and pinky fingers while curling the others tightly.",
+            "Call Me": "Extend your thumb and pinky finger out, while curling the middle three fingers.",
+            "Crossed Fingers": "Cross your middle finger over the back of your index finger.",
+            "Middle Finger": "Extend ONLY your middle finger while keeping all other fingers curled into your palm.",
+            "Thumbs Up": "Curl all your fingers into a fist and extend your thumb straight up.",
+            "Thumbs Down": "Curl all your fingers into a fist and point your thumb straight down.",
+            "Pointing": "Extend your index finger and curl the rest of your fingers. Used for drawing or pointing."
         }
         self.instruction_lbl.configure(text=instructions.get(g, "Practice this gesture to improve accuracy."))
         

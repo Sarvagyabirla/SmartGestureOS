@@ -82,8 +82,8 @@ def test_gestures():
 def test_crossed_fingers():
     h = create_hand([0, 1, 1, 0, 0])[0]
     # Cross index and middle fingers and make them close together
-    h['landmarks'][8] = Landmark(8, 41, h['landmarks'][8].pixel_y, 0.41, h['landmarks'][8].y, 0.0)
-    h['landmarks'][12] = Landmark(12, 39, h['landmarks'][12].pixel_y, 0.39, h['landmarks'][12].y, 0.0)
+    h['landmarks'][8] = Landmark(id=8, pixel_x=41, pixel_y=h['landmarks'][8].pixel_y, x=0.41, y=h['landmarks'][8].y, z=0.0)
+    h['landmarks'][12] = Landmark(id=12, pixel_x=39, pixel_y=h['landmarks'][12].pixel_y, x=0.39, y=h['landmarks'][12].y, z=0.0)
     
     c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
     for _ in range(5):

@@ -53,3 +53,8 @@ class MouseController:
             lms_list=lms_list,
             scale_factor=scale_factor
         )
+
+    def release_all(self):
+        """Release all actions and reset engine state."""
+        self.mouse.release_all()
+        self.engine.on_hand_lost()

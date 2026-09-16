@@ -105,3 +105,13 @@ class VirtualMouse:
         elif not start and self.is_dragging:
             self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             self.is_dragging = False
+
+    def release_all(self):
+        """Emergency failsafe to release all mouse buttons."""
+        try:
+            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+        except Exception as e:
+            from .logger import logger
+            logger.error(f"Failed to release mouse buttons: {e}")
+        self.is_dragging = False

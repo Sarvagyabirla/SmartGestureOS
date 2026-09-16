@@ -25,7 +25,7 @@ class GestureHoldTimer:
     def get_progress(self):
         if not self.target_gesture or self.target_gesture == "None" or self.target_gesture == "Unknown" or self.executed_once:
             return 0.0
-        now = time.time()
+        now = time.perf_counter()
         progress = (now - self.start_time) / self.duration
         return max(0.0, min(1.0, progress))
         
@@ -37,7 +37,7 @@ class GestureHoldTimer:
             
         if gesture != self.target_gesture:
             self.target_gesture = gesture
-            self.start_time = time.time()
+            self.start_time = time.perf_counter()
             self.last_executed = 0
             self.executed_once = False
             return False
@@ -45,7 +45,7 @@ class GestureHoldTimer:
         if not is_repeatable and self.executed_once:
             return False
             
-        now = time.time()
+        now = time.perf_counter()
         
         if not self.executed_once:
             if now - self.start_time >= self.duration:
@@ -111,6 +111,7 @@ class GestureMapper:
             "save_drawing": {"func": self.canvas.save_image, "repeatable": False},
             "cycle_color": {"func": self.canvas.cycle_color, "repeatable": False},
             "toggle_eraser": {"func": self.canvas.toggle_eraser, "repeatable": False},
+            "clear_canvas": {"func": self.canvas.clear, "repeatable": False},
             "toggle_sleep": {"func": lambda: None, "repeatable": False} # Handled explicitly in process()
         }
         
@@ -127,8 +128,13 @@ class GestureMapper:
     def execute_action(self, action_name):
         if action_name in self.action_registry:
             try:
-                self.action_registry[action_name]["func"]()
+                res = self.action_registry[action_name]["func"]()
                 self.feedback.speak(action_name.replace("_", " "))
+                if hasattr(res, "success"): # Support for ActionResult
+                    if res.success:
+                        return f"Executed: {action_name}"
+                    else:
+                        return f"Failed: {action_name}"
                 return f"Executed: {action_name}"
             except Exception as e:
                 from .logger import logger
@@ -139,12 +145,13 @@ class GestureMapper:
     def set_mode(self, mode):
         if mode in self.modes:
             self.mode = mode
+            self.mouse.release_all()
+            self.brightness_gesture_active = False
             logger.info(f"Switched Mode: {self.mode}")
             
     def cycle_mode(self):
         idx = self.modes.index(self.mode)
-        self.mode = self.modes[(idx + 1) % len(self.modes)]
-        logger.info(f"Switched Mode: {self.mode}")
+        self.set_mode(self.modes[(idx + 1) % len(self.modes)])
 
     def get_sleep_gesture(self, mappings):
         for g, action_name in mappings.items():
@@ -159,6 +166,7 @@ class GestureMapper:
         gesture = stable_gesture
         
         if not hands_data:
+            self.mouse.engine.on_hand_lost()
             return frame, action, progress
             
         h1 = hands_data[0]['landmarks']
@@ -173,6 +181,7 @@ class GestureMapper:
             if self.sleep_timer.check(sleep_gesture):
                 self.is_sleeping = not self.is_sleeping
                 self.feedback.speak("Sleeping" if self.is_sleeping else "Waking up")
+                self.mouse.release_all()
                 return frame, "System Sleeping" if self.is_sleeping else "System Woke Up", 1.0
         else:
             self.sleep_timer.check(None)
@@ -183,62 +192,61 @@ class GestureMapper:
             sleep_prog = self.sleep_timer.get_progress() if (sleep_gesture and gesture == sleep_gesture) else 0.0
             return frame, "Sleeping", sleep_prog
 
-        # Check global timed gestures based on mappings
-        mapped_action = mappings.get(gesture)
-        if mapped_action == "toggle_sleep":
-            self.timer.check(None)
-            progress = self.sleep_timer.get_progress()
-        elif mapped_action:
-            action_info = self.action_registry.get(mapped_action, {})
-            is_repeatable = action_info.get("repeatable", False)
-            if self.timer.check(gesture, is_repeatable=is_repeatable):
-                action = self.execute_action(mapped_action)
-                if action:
-                    return frame, action, 1.0 # 1.0 progress on execution
-            progress = self.timer.get_progress() # Update progress after check
-        else:
-            self.timer.check(None)
-            progress = 0.0
-
-        # Mode specific immediate execution
+        # Map gestures that should trigger without delay (continuous controls inside mouse controller)
+        continuous_gestures = ["Pointing", "Pinch", "Two Fingers", "Three Fingers"]
+        
+        # Mode specific execution (Continuous)
         if self.mode == "GENERAL":
-            if raw_gesture in ["Pinch", "Closed Fist", "Pointing", "Victory", "Two Fingers", "Three Fingers"]:
+            if gesture in continuous_gestures or gesture == "Closed Fist" or gesture == "Victory":
                 self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h)
             elif gesture == "Middle Finger":
-                current_y = h1[12].y # Middle finger tip Y (normalized)
-                # Absolute positioning: Y=0 (top) is 100% brightness, Y=1 (bottom) is 0% brightness
-                # Clamp Y between 0.2 and 0.8 to allow comfortable arm range
-                clamped_y = max(0.2, min(0.8, current_y))
-                brightness_perc = 1.0 - ((clamped_y - 0.2) / 0.6) # Invert so UP = 100%
-                
-                target_brightness = int(brightness_perc * 100)
-                self.brightness.set_absolute_brightness(target_brightness)
+                current_y = h1[12].y
+                self.brightness.set_brightness_from_y(current_y)
                 action = "Adjusting Brightness"
-
                 
             if gesture != "Middle Finger":
                 self.brightness_gesture_active = False
-                
+
         elif self.mode == "DRAW":
-            import cv2
             draw_mode = (gesture == "Pointing")
             sx, sy = self.canvas.draw(index_x, index_y, draw_mode=draw_mode)
             
             if not draw_mode:
                 cv2.circle(frame, (sx, sy), 8, self.canvas.color, 2)
                 
-            if gesture == "Pinch":
-                self.canvas.clear()
-                action = "Canvas Cleared"
             frame = self.canvas.get_overlay(frame)
-            
-        elif self.mode == "MEDIA":
-            pass # Volume is mapped globally to Thumb Up/Down now
-            
+
+        # Check global timed gestures based on mappings (Discrete)
+        mapped_action = mappings.get(gesture)
+        if mapped_action == "toggle_sleep":
+            self.timer.check(None)
+            progress = self.sleep_timer.get_progress()
+        elif mapped_action and gesture not in continuous_gestures:
+            # Discrete gestures go through hold timer
+            action_info = self.action_registry.get(mapped_action, {})
+            is_repeatable = action_info.get("repeatable", False)
+            if self.timer.check(gesture, is_repeatable=is_repeatable):
+                action = self.execute_action(mapped_action)
+                if action:
+                    return frame, action, 1.0
+            progress = self.timer.get_progress()
+        else:
+            self.timer.check(None)
+            if mapped_action and gesture in continuous_gestures:
+                # E.g. Three Fingers in MEDIA mode mapped to previous track should still execute
+                if self.mode != "GENERAL" or mapped_action not in ["click", "drag", "scroll"]:
+                    action_info = self.action_registry.get(mapped_action, {})
+                    is_repeatable = action_info.get("repeatable", False)
+                    if self.timer.check(gesture, is_repeatable=is_repeatable):
+                        action = self.execute_action(mapped_action)
+                        if action:
+                            return frame, action, 1.0
+                    progress = self.timer.get_progress()
+
         return frame, action, progress
 
     def cleanup(self):
         if hasattr(self, 'mouse'):
-            self.mouse.mouse.drag(start=False)
+            self.mouse.release_all()
         if hasattr(self, 'feedback'):
             self.feedback.stop()

@@ -165,9 +165,9 @@ class GestureClassifier:
             return "Three Fingers", shape_score
         elif fingers[1:] == [1, 1, 1, 1]: 
             return "Four Fingers", shape_score
-        elif fingers[1:] == [1, 0, 0, 1]: 
+        elif fingers == [1, 1, 0, 0, 1] or fingers == [0, 1, 0, 0, 1]: 
             return "Rock On", shape_score
-        elif fingers[1:] == [0, 0, 0, 1]: 
+        elif fingers == [1, 0, 0, 0, 1]: 
             return "Call Me", shape_score
             
         return "Unknown", 0.0
@@ -191,4 +191,4 @@ class GestureClassifier:
         if self.confidence_ema < self.confidence_threshold:
             return GestureResult("Unknown", raw_gesture, float(self.confidence_ema), 0.0, "Low confidence")
             
-        return GestureResult(self.last_stable_gesture, raw_gesture, float(self.confidence_ema), 1.0)
+        return GestureResult(self.last_stable_gesture, raw_gesture, float(self.confidence_ema), 0.0)
