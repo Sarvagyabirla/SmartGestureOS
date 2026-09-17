@@ -4,6 +4,12 @@ from pathlib import Path
 from src.paths import RESOURCE_DIR, PROFILES_DIR
 
 class SettingsManager:
+    """
+    Manages application settings.
+    - Active Profile: Saved in profiles/<name>.json (e.g. profiles/default.json). This is the active user profile and where settings are saved.
+    - Fallback/Defaults: config/defaults.json is loaded first as a fallback structure. 
+    - Active Settings: self.settings contains the merged result.
+    """
     def __init__(self):
         self.profiles_dir = PROFILES_DIR
         self.current_profile = "default"

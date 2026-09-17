@@ -84,18 +84,26 @@ class MainApp:
                 self.cpu_usage = total_cpu
                 self.ram_usage = total_ram / (1024 * 1024) # MB
             except Exception as e:
-                logger.error(f"Stats error: {e}")
+                logger.exception("Stats error:")
                 time.sleep(1)
 
     def stop_system(self):
         self.running = False
+        
+        # Unblock queues to prevent thread lock
+        try:
+            while not self.frame_queue.empty():
+                self.frame_queue.get_nowait()
+        except queue.Empty:
+            pass
+            
         self.camera.stop()
         if hasattr(self, 'mapper'):
             self.mapper.cleanup()
         if hasattr(self, 'detector'):
             self.detector.close()
         if self.process_thread:
-            self.process_thread.join(timeout=1.0)
+            self.process_thread.join(timeout=2.0)
         if self.stats_thread:
             self.stats_thread.join(timeout=1.0)
 
@@ -149,7 +157,7 @@ class MainApp:
                         if self.frame_queue.full():
                             self.frame_queue.get_nowait()
                         self.frame_queue.put_nowait((frame, [], self.mapper.mode, "Unknown", "Unknown", 0, None, 0, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, 0))
-                    except queue.Empty:
+                    except (queue.Empty, queue.Full):
                         pass
                     time.sleep(0.1)
                     continue
@@ -214,17 +222,15 @@ class MainApp:
                     fps = int(sum(self.fps_history) / len(self.fps_history))
                     avg_latency = int(sum(self.latency_history) / len(self.latency_history)) if self.latency_history else 0
 
-                    if not self.frame_queue.full():
-                        self.frame_queue.put((display_frame, latest_hands_data, self.mapper.mode, latest_stable_gesture, latest_raw_gesture, latest_confidence, latest_action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, avg_latency))
-                    else:
-                        try:
+                    try:
+                        if self.frame_queue.full():
                             self.frame_queue.get_nowait()
-                            self.frame_queue.put_nowait((display_frame, latest_hands_data, self.mapper.mode, latest_stable_gesture, latest_raw_gesture, latest_confidence, latest_action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, avg_latency))
-                        except queue.Empty:
-                            pass
+                        self.frame_queue.put_nowait((display_frame, latest_hands_data, self.mapper.mode, latest_stable_gesture, latest_raw_gesture, latest_confidence, latest_action, fps, self.cpu_usage, self.ram_usage, self.camera.is_connected, self.mapper.is_sleeping, avg_latency))
+                    except (queue.Empty, queue.Full):
+                        pass
 
             except Exception as e:
-                logger.error(f"Error in processing loop: {e}")
+                logger.exception("Error in processing loop:")
 
             elapsed = time.perf_counter() - loop_start
             sleep_time = (1.0 / 60.0) - elapsed
@@ -242,7 +248,7 @@ class MainApp:
                 self.ui.update_dashboard(mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage, ram_usage, camera_on, is_sleeping, avg_latency)
                 self.ui.update_frame(frame)
         except Exception as e:
-            logger.error(f"Error in UI update loop: {e}")
+            logger.exception("Error in UI update loop:")
 
         self.ui.after(15, self.update_ui_loop)
 
@@ -250,7 +256,7 @@ class MainApp:
         try:
             self.ui.mainloop()
         except Exception as e:
-            logger.error(f"App crashed: {e}")
+            logger.exception("App crashed:")
         finally:
             self.stop_system()
 

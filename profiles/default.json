@@ -42,6 +42,7 @@
             "Four Fingers": "save_drawing",
             "Thumb Up": "cycle_color",
             "Thumb Down": "toggle_eraser",
+            "Closed Fist": "clear_canvas",
             "Call Me": "switch_mode"
         }
     },

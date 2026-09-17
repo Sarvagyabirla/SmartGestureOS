@@ -69,24 +69,18 @@ class VirtualMouse:
             logger.error(f"Failed to move mouse: {e}")
                 
     def click(self, button="left"):
-        current_time = time.time()
-        if current_time - self.last_click_time > 0.3:
-            if button == "left":
-                self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            elif button == "right":
-                self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-            self.last_click_time = current_time
+        if button == "left":
+            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        elif button == "right":
+            self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+            self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             
     def double_click(self):
-        current_time = time.time()
-        if current_time - self.last_click_time > 0.5:
-            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-            self.last_click_time = current_time
+        self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             
     def scroll(self, amount):
         wheel_delta = int(amount * 120) & 0xFFFFFFFF

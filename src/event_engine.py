@@ -18,6 +18,7 @@ class EventEngine:
         self.last_state_change = time.perf_counter()
 
         self.scroll_start_y = None
+        self.scroll_accumulator = 0.0
         
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
@@ -37,25 +38,27 @@ class EventEngine:
         """Mandatory failsafe"""
         self.mouse.mouse.drag(start=False)
         self.scroll_start_y = None
+        self.scroll_accumulator = 0.0
         self._change_state(EventState.HAND_LOST)
 
     def process(self, stable_gesture, raw_gesture, index_x, index_y, frame_w, frame_h, lms_list=None, scale_factor=1.0):
         now = time.perf_counter()
 
+        if self.state == EventState.HAND_LOST:
+            if lms_list and len(lms_list) > 0 and stable_gesture != "None" and stable_gesture != "Unknown":
+                self._change_state(EventState.HOVER)
+
         # Always update mouse position on movement gestures (if not lost)
         if raw_gesture in ["Pointing", "Pinch", "Three Fingers", "Victory", "Two Fingers", "Closed Fist"] and self.state != EventState.HAND_LOST:
             self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
 
-        if self.state == EventState.HAND_LOST:
-            if stable_gesture != "Unknown" and stable_gesture != "None":
-                self._change_state(EventState.HOVER)
-
-        elif self.state == EventState.HOVER:
+        if self.state == EventState.HOVER:
             if stable_gesture == "Pinch":
                 self.pinch_down_time = now
                 self._change_state(EventState.PINCH_DOWN)
             elif stable_gesture == "Two Fingers":
                 self.scroll_start_y = lms_list[8].y if lms_list else None
+                self.scroll_accumulator = 0.0
                 self._change_state(EventState.SCROLLING)
             elif stable_gesture == "Three Fingers":
                 self.mouse.mouse.click(button="right")
@@ -98,16 +101,25 @@ class EventEngine:
         elif self.state == EventState.SCROLLING:
             if stable_gesture != "Two Fingers":
                 self.scroll_start_y = None
+                self.scroll_accumulator = 0.0
                 self._change_state(EventState.HOVER)
             elif lms_list and self.scroll_start_y is not None:
                 current_y = lms_list[8].y
                 dy = (current_y - self.scroll_start_y) * scale_factor
-                if dy > 0.05:
+                
+                # Accumulate the scroll delta
+                self.scroll_accumulator += dy
+                
+                # Threshold to emit scroll tick
+                scroll_threshold = 0.03
+                while self.scroll_accumulator > scroll_threshold:
                     self.mouse.mouse.scroll(-1)
-                    self.scroll_start_y = current_y
-                elif dy < -0.05:
+                    self.scroll_accumulator -= scroll_threshold
+                while self.scroll_accumulator < -scroll_threshold:
                     self.mouse.mouse.scroll(1)
-                    self.scroll_start_y = current_y
+                    self.scroll_accumulator += scroll_threshold
+                    
+                self.scroll_start_y = current_y
 
         elif self.state == EventState.COOLDOWN:
             if now - self.last_state_change >= self.cooldown_duration:

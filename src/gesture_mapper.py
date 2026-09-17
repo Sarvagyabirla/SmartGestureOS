@@ -121,9 +121,10 @@ class GestureMapper:
         
     def on_settings_changed(self):
         from config import SETTINGS
-        cooldown_ms = SETTINGS.get("gestures", {}).get("cooldown_ms", 400)
-        self.timer.duration = cooldown_ms / 1000.0
-        self.timer.repeat_cooldown = (cooldown_ms / 1000.0) * 0.75
+        hold_time_ms = SETTINGS.get("gestures", {}).get("hold_time_ms", 300)
+        cooldown_ms = SETTINGS.get("gestures", {}).get("cooldown_ms", 500)
+        self.timer.duration = hold_time_ms / 1000.0
+        self.timer.repeat_cooldown = cooldown_ms / 1000.0
         
     def execute_action(self, action_name):
         if action_name in self.action_registry:
@@ -192,14 +193,18 @@ class GestureMapper:
             sleep_prog = self.sleep_timer.get_progress() if (sleep_gesture and gesture == sleep_gesture) else 0.0
             return frame, "Sleeping", sleep_prog
 
-        # Map gestures that should trigger without delay (continuous controls inside mouse controller)
-        continuous_gestures = ["Pointing", "Pinch", "Two Fingers", "Three Fingers"]
+        # Identify if current gesture maps to a continuous/movement action
+        mapped_action = mappings.get(gesture)
+        raw_mapped_action = mappings.get(raw_gesture)
+        
+        continuous_actions = ["click", "drag", "scroll", "move"] # concept for general mode
         
         # Mode specific execution (Continuous)
         if self.mode == "GENERAL":
-            if gesture in continuous_gestures or gesture == "Closed Fist" or gesture == "Victory":
-                self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h)
-            elif gesture == "Middle Finger":
+            # Pass raw_gesture to mouse controller so it can move cursor immediately
+            self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h)
+                
+            if gesture == "Middle Finger":
                 current_y = h1[12].y
                 self.brightness.set_brightness_from_y(current_y)
                 action = "Adjusting Brightness"
@@ -208,21 +213,20 @@ class GestureMapper:
                 self.brightness_gesture_active = False
 
         elif self.mode == "DRAW":
-            draw_mode = (gesture == "Pointing")
+            draw_mode = (raw_gesture == "Pointing") or (gesture == "Pointing")
             sx, sy = self.canvas.draw(index_x, index_y, draw_mode=draw_mode)
             
             if not draw_mode:
+                import cv2
                 cv2.circle(frame, (sx, sy), 8, self.canvas.color, 2)
                 
             frame = self.canvas.get_overlay(frame)
 
-        # Check global timed gestures based on mappings (Discrete)
-        mapped_action = mappings.get(gesture)
+        # Discrete Actions
         if mapped_action == "toggle_sleep":
             self.timer.check(None)
             progress = self.sleep_timer.get_progress()
-        elif mapped_action and gesture not in continuous_gestures:
-            # Discrete gestures go through hold timer
+        elif mapped_action:
             action_info = self.action_registry.get(mapped_action, {})
             is_repeatable = action_info.get("repeatable", False)
             if self.timer.check(gesture, is_repeatable=is_repeatable):
@@ -232,16 +236,6 @@ class GestureMapper:
             progress = self.timer.get_progress()
         else:
             self.timer.check(None)
-            if mapped_action and gesture in continuous_gestures:
-                # E.g. Three Fingers in MEDIA mode mapped to previous track should still execute
-                if self.mode != "GENERAL" or mapped_action not in ["click", "drag", "scroll"]:
-                    action_info = self.action_registry.get(mapped_action, {})
-                    is_repeatable = action_info.get("repeatable", False)
-                    if self.timer.check(gesture, is_repeatable=is_repeatable):
-                        action = self.execute_action(mapped_action)
-                        if action:
-                            return frame, action, 1.0
-                    progress = self.timer.get_progress()
 
         return frame, action, progress
 

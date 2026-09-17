@@ -76,9 +76,29 @@ def test_gestures():
     check([1, 0, 0, 0, 0], "Thumb Up")
     check([0, 1, 0, 0, 0], "Pointing")
     check([1, 1, 0, 0, 0], "Pointing")
-    check([0, 1, 1, 0, 0], "Victory")
-    # Pinch test requires tight thumb and index
     
+    # The default create_hand makes fingers parallel (no divergence)
+    check([0, 1, 1, 0, 0], "Two Fingers")
+    
+def test_victory():
+    # Create a hand with [0, 1, 1, 0, 0] but diverge the tips
+    h = create_hand([0, 1, 1, 0, 0])[0]
+    
+    # Base:
+    # index mcp = (30, 100), middle mcp = (50, 100) -> d_mcp = 20
+    # index tip = (30, 50), middle tip = (50, 50) -> parallel
+    
+    # Make index point left
+    h['landmarks'][8] = Landmark(id=8, pixel_x=10, pixel_y=50, x=0.1, y=0.5, z=0.0)
+    # Make middle point right
+    h['landmarks'][12] = Landmark(id=12, pixel_x=70, pixel_y=50, x=0.7, y=0.5, z=0.0)
+    
+    c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
+    for _ in range(5):
+        c.classify([h])
+    res = c.classify([h]).gesture
+    assert res == "Victory", f"Got {res}, expected Victory for diverging fingers"
+
 def test_crossed_fingers():
     h = create_hand([0, 1, 1, 0, 0])[0]
     # Cross index and middle fingers and make them close together
