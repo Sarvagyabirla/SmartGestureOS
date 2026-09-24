@@ -1,93 +1,156 @@
+"""
+ShortcutController — safe Windows application launcher.
+
+Uses shell=False with explicit executable paths wherever possible.
+Falls back to os.startfile for simple system apps.
+Never passes user-supplied strings to shell commands.
+"""
+
 import os
 import time
 import subprocess
+import shutil
 import keyboard
 from .logger import logger
+from .models import ActionResult
+
+
+_BUILTIN_APP_NAMES = frozenset({
+    "calc", "notepad", "explorer", "mspaint",
+    "write", "cmd", "powershell",
+})
+
 
 class ShortcutController:
     def __init__(self):
-        self.last_open_time = 0
-        
-    def _open(self, cmd, cooldown=2.0):
-        if time.time() - self.last_open_time > cooldown:
-            import shutil
-            executable = cmd.split()[0]
-            if executable.lower() not in ["start", "rundll32.exe"] and not shutil.which(executable):
-                raise FileNotFoundError(f"Command '{executable}' not found in PATH.")
-                
-            p = subprocess.Popen(cmd, shell=True, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-            
-            time.sleep(0.1) # brief wait to catch immediate failures
-            if p.poll() is not None and p.returncode != 0:
-                err = p.stderr.read().decode('utf-8', errors='ignore').strip()
-                raise Exception(f"Launch failed: {err}")
-                
-            self.last_open_time = time.time()
-            logger.info(f"Executed shortcut: {cmd}")
-                
-    def _find_and_open(self, executable_name, env_paths, fallback_command):
-        import shutil
-        import os
-        from .logger import logger
-        
-        # 1. Check PATH
-        path_exe = shutil.which(executable_name)
-        if path_exe:
-            self._open(f'"{path_exe}"')
-            return True
-            
-        # 2. Check common env paths
-        for env_var, subpath in env_paths:
-            base_dir = os.environ.get(env_var)
-            if base_dir:
-                full_path = os.path.join(base_dir, subpath)
-                if os.path.exists(full_path):
-                    self._open(f'"{full_path}"')
-                    return True
-                    
-        # 3. Fallback
+        # Use perf_counter for monotonic rate-limiting (F-03 fix)
+        self._last_open_time = 0.0
+        self._open_cooldown = 2.0  # seconds between launches
+
+    # ── Internal launcher (shell=False) ──────────────────────────────────────
+
+    def _launch_exe(self, exe_path: str, args: list = None) -> ActionResult:
+        """Launch an executable with shell=False. Returns ActionResult."""
+        now = time.perf_counter()
+        if now - self._last_open_time < self._open_cooldown:
+            return ActionResult(False, "launch", "Cooldown active — launch skipped.", None)
+
+        if not os.path.isfile(exe_path):
+            msg = f"Executable not found: {exe_path}"
+            logger.error(msg)
+            return ActionResult(False, "launch", "Application not found.", msg)
+
         try:
-            self._open(fallback_command)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to find or launch {executable_name}: {e}")
-            raise
+            cmd = [exe_path] + (args or [])
+            subprocess.Popen(cmd, shell=False)  # F-07: shell=False
+            self._last_open_time = now
+            logger.info(f"Launched: {exe_path}")
+            return ActionResult(True, "launch", f"Launched {os.path.basename(exe_path)}")
+        except OSError as e:
+            logger.error(f"Failed to launch {exe_path}: {e}")
+            return ActionResult(False, "launch", "Launch failed.", str(e))
 
-    def open_chrome(self):
-        env_paths = [
-            ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+    def _launch_system_app(self, name: str) -> ActionResult:
+        """Launch a simple Windows system app by name using os.startfile."""
+        now = time.perf_counter()
+        if now - self._last_open_time < self._open_cooldown:
+            return ActionResult(False, "launch", "Cooldown active — launch skipped.", None)
+        try:
+            os.startfile(name)  # Safe: no shell injection; name is a literal constant
+            self._last_open_time = now
+            logger.info(f"Launched system app: {name}")
+            return ActionResult(True, "launch", f"Launched {name}")
+        except OSError as e:
+            logger.error(f"Failed to launch system app {name}: {e}")
+            return ActionResult(False, "launch", f"Could not launch {name}.", str(e))
+
+    def _find_exe(self, name_in_path: str, env_paths: list) -> str | None:
+        """
+        Locate an executable.
+        1. Check PATH (shutil.which)
+        2. Check well-known env-var–relative paths
+        Returns absolute path string or None.
+        """
+        found = shutil.which(name_in_path)
+        if found:
+            return found
+        for env_var, subpath in env_paths:
+            base = os.environ.get(env_var, "")
+            if base:
+                full = os.path.join(base, subpath)
+                if os.path.isfile(full):
+                    return full
+        return None
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def open_chrome(self) -> ActionResult:
+        exe = self._find_exe("chrome.exe", [
+            ("ProgramFiles",      r"Google\Chrome\Application\chrome.exe"),
             ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
-            ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe")
-        ]
-        self._find_and_open("chrome.exe", env_paths, "start chrome")
-        
-    def open_vscode(self):
-        env_paths = [
+            ("LOCALAPPDATA",      r"Google\Chrome\Application\chrome.exe"),
+        ])
+        if exe:
+            return self._launch_exe(exe)
+        return ActionResult(
+            False, "open_chrome",
+            "Chrome not found. Install it or set it in Settings.",
+            "chrome.exe not found in PATH or known install dirs",
+        )
+
+    def open_vscode(self) -> ActionResult:
+        exe = self._find_exe("code.cmd", [
             ("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"),
-            ("ProgramFiles", r"Microsoft VS Code\Code.exe")
-        ]
-        self._find_and_open("code.cmd", env_paths, "code")
-        
-    def open_explorer(self):
-        self._open("explorer")
-        
-    def open_calculator(self):
-        self._open("calc")
-        
-    def open_notepad(self):
-        self._open("notepad")
-        
-    def lock_pc(self):
-        self._open("rundll32.exe user32.dll,LockWorkStation")
+            ("ProgramFiles",  r"Microsoft VS Code\Code.exe"),
+        ])
+        # Fallback: look for Code.exe directly
+        if not exe:
+            exe = self._find_exe("Code.exe", [
+                ("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"),
+                ("ProgramFiles",  r"Microsoft VS Code\Code.exe"),
+            ])
+        if exe:
+            return self._launch_exe(exe)
+        return ActionResult(
+            False, "open_vscode",
+            "VS Code not found. Install it or add it to PATH.",
+            "Code.exe not found",
+        )
 
-    def snap_left(self):
-        keyboard.send('windows+left')
+    def open_explorer(self) -> ActionResult:
+        return self._launch_system_app("explorer")
 
-    def snap_right(self):
-        keyboard.send('windows+right')
+    def open_calculator(self) -> ActionResult:
+        return self._launch_system_app("calc")
 
-    def maximize(self):
-        keyboard.send('windows+up')
+    def open_notepad(self) -> ActionResult:
+        return self._launch_system_app("notepad")
 
-    def minimize(self):
-        keyboard.send('windows+down')
+    def lock_pc(self) -> ActionResult:
+        """Lock the workstation via Win32 API (no shell)."""
+        now = time.perf_counter()
+        if now - self._last_open_time < self._open_cooldown:
+            return ActionResult(False, "lock_pc", "Cooldown active.", None)
+        try:
+            import ctypes
+            ctypes.windll.user32.LockWorkStation()
+            self._last_open_time = now
+            logger.info("Workstation locked.")
+            return ActionResult(True, "lock_pc", "PC locked.")
+        except Exception as e:
+            logger.error(f"Lock PC failed: {e}")
+            return ActionResult(False, "lock_pc", "Failed to lock PC.", str(e))
+
+    # ── Window management (keyboard shortcuts) ────────────────────────────────
+
+    def snap_left(self) -> None:
+        keyboard.send("windows+left")
+
+    def snap_right(self) -> None:
+        keyboard.send("windows+right")
+
+    def maximize(self) -> None:
+        keyboard.send("windows+up")
+
+    def minimize(self) -> None:
+        keyboard.send("windows+down")

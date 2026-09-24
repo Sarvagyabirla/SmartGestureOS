@@ -33,7 +33,7 @@ class TestUtils(unittest.TestCase):
 
 class TestGestureClassifier(unittest.TestCase):
     def setUp(self):
-        self.classifier = GestureClassifier(confidence_threshold=50, hold_time_ms=50) # Low hold time for tests
+        self.classifier = GestureClassifier(confidence_threshold=50)  # F-12: hold_time_ms removed
         
     def create_mock_hand(self, thumb_up=False, index_up=False):
         # Create a mock 21-point hand

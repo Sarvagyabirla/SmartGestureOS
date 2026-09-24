@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Publish GitHub Release
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag matches version.py
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = python -c "from src.version import __version__; print(__version__)"
+          if ($tag -ne "v$version") {
+            Write-Error "Tag $tag does not match src/version.py version v$version"
+            exit 1
+          }
+          Write-Host "Version validated: $version"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Verify pip check
+        run: pip check
+
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Build PyInstaller bundle
+        run: |
+          python -m PyInstaller --noconfirm --clean packaging/windows/SmartGesture.spec
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        run: iscc packaging\windows\SmartGestureOS.iss
+
+      - name: Get installer name
+        id: installer
+        run: |
+          $path = (Get-Item "dist\SmartGestureOS_Setup*.exe").FullName
+          echo "path=$path" >> $env:GITHUB_OUTPUT
+          echo "name=$(Split-Path $path -Leaf)" >> $env:GITHUB_OUTPUT
+
+      - name: Compute SHA-256
+        id: sha256
+        run: |
+          $hash = (Get-FileHash "${{ steps.installer.outputs.path }}" -Algorithm SHA256).Hash
+          echo "hash=$hash" >> $env:GITHUB_OUTPUT
+          echo "$hash  ${{ steps.installer.outputs.name }}" > dist\SHA256SUMS.txt
+
+      - name: Extract changelog entry for this release
+        id: changelog
+        run: |
+          $content = Get-Content CHANGELOG.md -Raw
+          # Extract the first version block
+          $match = [regex]::Match($content, '## \[([^\]]+)\].*?\n(.*?)(?=\n## |\z)', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+          $body = if ($match.Success) { $match.Groups[2].Value.Trim() } else { "See CHANGELOG.md for release notes." }
+          $body | Out-File -FilePath dist\release_notes.txt -Encoding utf8
+          echo "notes<<EOF" >> $env:GITHUB_OUTPUT
+          Get-Content dist\release_notes.txt >> $env:GITHUB_OUTPUT
+          echo "EOF" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SmartGestureOS ${{ github.ref_name }}
+          body: |
+            ## SmartGestureOS ${{ github.ref_name }}
+
+            ${{ steps.changelog.outputs.notes }}
+
+            ---
+
+            **SHA-256:** `${{ steps.sha256.outputs.hash }}`
+
+            > ⚠️ **Windows may show a SmartScreen warning** because this installer is not yet code-signed.
+            > Click "More info" → "Run anyway" to proceed. We are working on obtaining a code-signing certificate.
+          files: |
+            ${{ steps.installer.outputs.path }}
+            dist/SHA256SUMS.txt
+          draft: false
+          prerelease: false

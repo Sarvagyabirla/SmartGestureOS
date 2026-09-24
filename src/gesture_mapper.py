@@ -129,6 +129,9 @@ class GestureMapper:
     def execute_action(self, action_name):
         if action_name in self.action_registry:
             try:
+                # Safety: release all mouse input before lock_pc to prevent stuck buttons
+                if action_name == "lock_pc":
+                    self.mouse.release_all()
                 res = self.action_registry[action_name]["func"]()
                 self.feedback.speak(action_name.replace("_", " "))
                 if hasattr(res, "success"): # Support for ActionResult

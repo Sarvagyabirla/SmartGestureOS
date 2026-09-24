@@ -43,15 +43,17 @@ class Camera:
         
     def _update(self):
         import time
+        import numpy as np
         failed_reads = 0
         while self.running:
             if not self.cap.isOpened():
+                self.is_connected = False
                 time.sleep(1)
                 self._open_capture()
                 continue
-                
+
             ret, frame = self.cap.read()
-            if not ret:
+            if not ret or not isinstance(frame, np.ndarray):
                 self.is_connected = False
                 failed_reads += 1
                 logger.warning(f"Failed to grab frame (count: {failed_reads})")

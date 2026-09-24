@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 block_cipher = None
-ROOT = Path(SPECPATH)
+ROOT = Path(SPECPATH).parent.parent
 
 # ---------------------------------------------------------------------------
 # Collect CustomTkinter runtime data (themes, fonts, assets)

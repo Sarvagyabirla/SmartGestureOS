@@ -7,25 +7,35 @@ from config import SETTINGS
 from .models import Landmark, GestureResult
 
 class GestureClassifier:
-    def __init__(self, confidence_threshold=70, hold_time_ms=300):
+    """
+    Classifies raw hand landmark data into a named gesture.
+
+    Responsibilities (single, clear):
+        raw_classify  → geometry → raw gesture name + shape confidence
+        classify      → temporal stabilization (history mode filter + EMA)
+                      → returns GestureResult with stable + raw gesture
+
+    Note on hold_time_ms (F-12 fix):
+        hold_time_ms is NOT a classifier concern. The classifier answers
+        "what does the geometry look like?" The action hold/intent layer lives
+        in GestureHoldTimer inside GestureMapper.
+    """
+    def __init__(self, confidence_threshold: float = 70.0):
         self.tip_ids = [4, 8, 12, 16, 20]
         self.pip_ids = [3, 6, 10, 14, 18]
         self.mcp_ids = [2, 5, 9, 13, 17]
         self.confidence_ema = 0.0
         self.confidence_threshold = confidence_threshold
-        
-        self.hold_time = hold_time_ms / 1000.0
-        self.history = deque(maxlen=5) # Mode filter for jitter
+
+        self.history = deque(maxlen=5)  # Mode filter for jitter suppression
         self.last_stable_gesture = "None"
-        
+
         from src.settings_manager import settings_manager
         settings_manager.register_callback(self.on_settings_changed)
         
-    def on_settings_changed(self):
+    def on_settings_changed(self) -> None:
+        """Update calibration thresholds from settings."""
         from config import SETTINGS
-        hold_time_ms = SETTINGS.get("gestures", {}).get("hold_time_ms", 300)
-        self.hold_time = hold_time_ms / 1000.0
-        
         calib = SETTINGS.get("calibration", {})
         self.pinch_enter_threshold = calib.get("pinch_enter_threshold", 0.45)
         self.pinch_release_threshold = calib.get("pinch_release_threshold", 0.6)
@@ -166,6 +176,7 @@ class GestureClassifier:
                 angle_deg = np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
                 
             divergence_ratio = d_index_middle / max(0.01, d_mcp)
+            divergence_spread = (d_index_middle - d_mcp) / max(0.01, hand_size)
             
             # Check for Crossed Fingers using 3D vector dot product
             v_mcp = middle_mcp - index_mcp
@@ -179,8 +190,8 @@ class GestureClassifier:
             if is_crossed and d_index_middle < hand_size * (max_two_finger * 1.5):
                 return "Crossed Fingers", shape_score
                 
-            is_victory = (d_index_middle > hand_size * min_victory) and (angle_deg > 15.0) and (divergence_ratio > 1.5)
-            is_two_fingers = (d_index_middle <= hand_size * max_two_finger) or (angle_deg < 10.0 and divergence_ratio < 1.3)
+            is_victory = (d_index_middle > hand_size * min_victory) and (angle_deg > 18.0) and (divergence_ratio > 1.5)
+            is_two_fingers = (d_index_middle <= hand_size * max_two_finger) or (angle_deg < 14.0 and (divergence_ratio < 1.6 or divergence_spread < 0.15))
             
             if is_victory:
                 return "Victory", shape_score

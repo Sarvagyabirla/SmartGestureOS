@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SmartGestureOS — MSIX Package Manifest
+  
+  PARTNER CENTER REQUIREMENTS (F-40):
+  Before submitting to the Microsoft Store, you MUST update the following:
+  
+  1. Identity Name, Publisher:
+     - Log in to https://partner.microsoft.com/en-us/dashboard
+     - Go to: Apps and games → New product → MSIX or PWA app
+     - From "Product Identity" page, copy:
+       * Package/Identity Name  → replace "YOUR_STORE_IDENTITY_NAME_HERE"
+       * Package/Identity Publisher  → replace "CN=YOUR_PUBLISHER_CERT_HERE"
+       * Publisher Display Name → replace "Your Publisher Display Name"
+  
+  2. Version:
+     - Format: Major.Minor.Patch.0 (e.g., 0.9.0.0)
+     - Must be incremented on every store submission
+  
+  3. Capabilities:
+     - webcam (Devices → Camera) is REQUIRED; it is declared below
+     - If you add network features, you must also declare internet capabilities
+  
+  4. Visual Assets:
+     - Create all required image sizes in Assets/ folder:
+       Square44x44Logo, Square150x150Logo, Wide310x150Logo, Square310x310Logo
+     - Use the Partner Center Store logos tool or makeappx.exe
+     - All must be .png with transparent background
+  
+  5. Code Signing:
+     - You must have a code-signing certificate from a trusted CA OR
+       use Partner Center to upload and have Microsoft sign it
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap mp rescap">
+
+  <Identity
+    Name="YOUR_STORE_IDENTITY_NAME_HERE"
+    Publisher="CN=YOUR_PUBLISHER_CERT_HERE"
+    Version="0.9.0.0"
+    ProcessorArchitecture="x64" />
+
+  <mp:PhoneIdentity
+    PhoneProductId="00000000-0000-0000-0000-000000000000"
+    PhonePublisherId="00000000-0000-0000-0000-000000000000" />
+
+  <Properties>
+    <DisplayName>SmartGestureOS</DisplayName>
+    <PublisherDisplayName>Your Publisher Display Name</PublisherDisplayName>
+    <Logo>Assets\Square150x150Logo.png</Logo>
+    <Description>Control your Windows PC with hand gestures. Runs entirely locally — no cloud, no account required.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application
+      Id="SmartGestureOS"
+      Executable="SmartGestureOS.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="SmartGestureOS"
+        Description="Gesture control for Windows"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png"
+                         Square310x310Logo="Assets\Square310x310Logo.png"
+                         ShortName="SmartGesture" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#1a1a2e" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="smartgestureos" />
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- REQUIRED: Camera access for hand gesture detection -->
+    <DeviceCapability Name="webcam" />
+    <!-- Required for full-trust desktop app in MSIX -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+</Package>
