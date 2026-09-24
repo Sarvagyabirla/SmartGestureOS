@@ -12,7 +12,7 @@ class SmartGestureApp(ctk.CTk):
     def __init__(self, close_callback):
         super().__init__()
         
-        self.title("Smart Gesture Operating System")
+        self.title("SmartGestureOS")
         self.geometry("1100x700")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -84,7 +84,7 @@ class SmartGestureApp(ctk.CTk):
         # Stats panel
         self.stats_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.stats_frame.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
-        self.fps_label = ctk.CTkLabel(self.stats_frame, text="FPS: 0", font=normal_font, text_color=self.muted_text)
+        self.fps_label = ctk.CTkLabel(self.stats_frame, text="Rate: 0", font=normal_font, text_color=self.muted_text)
         self.fps_label.pack(side="left", expand=True)
         self.latency_label = ctk.CTkLabel(self.stats_frame, text="LAT: 0ms", font=normal_font, text_color=self.muted_text)
         self.latency_label.pack(side="left", expand=True)
@@ -209,7 +209,7 @@ class SmartGestureApp(ctk.CTk):
         import time
         current_time = time.time()
         if current_time - self.last_stat_update > 0.5:
-            self.fps_label.configure(text=f"FPS: {fps}")
+            self.fps_label.configure(text=f"Rate: {fps}")
             self.latency_label.configure(text=f"LAT: {avg_latency}ms")
             self.cpu_label.configure(text=f"CPU: {cpu_usage:.1f}%")
             self.ram_label.configure(text=f"RAM: {ram_usage:.1f} MB")

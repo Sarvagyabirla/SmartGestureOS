@@ -24,8 +24,7 @@ class EventEngine:
         self.pinch_release_time = 0.0
         
         # Configuration
-        self.pinch_click_max_ms = 250 / 1000.0
-        self.double_click_window_ms = 400 / 1000.0
+        self.double_click_window_ms = 300 / 1000.0
         self.drag_hold_ms = 350 / 1000.0
         self.cooldown_duration = 150 / 1000.0
 

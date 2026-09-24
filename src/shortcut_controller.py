@@ -25,11 +25,48 @@ class ShortcutController:
             self.last_open_time = time.time()
             logger.info(f"Executed shortcut: {cmd}")
                 
+    def _find_and_open(self, executable_name, env_paths, fallback_command):
+        import shutil
+        import os
+        from .logger import logger
+        
+        # 1. Check PATH
+        path_exe = shutil.which(executable_name)
+        if path_exe:
+            self._open(f'"{path_exe}"')
+            return True
+            
+        # 2. Check common env paths
+        for env_var, subpath in env_paths:
+            base_dir = os.environ.get(env_var)
+            if base_dir:
+                full_path = os.path.join(base_dir, subpath)
+                if os.path.exists(full_path):
+                    self._open(f'"{full_path}"')
+                    return True
+                    
+        # 3. Fallback
+        try:
+            self._open(fallback_command)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to find or launch {executable_name}: {e}")
+            raise
+
     def open_chrome(self):
-        self._open("start chrome")
+        env_paths = [
+            ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+            ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+            ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe")
+        ]
+        self._find_and_open("chrome.exe", env_paths, "start chrome")
         
     def open_vscode(self):
-        self._open("code")
+        env_paths = [
+            ("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"),
+            ("ProgramFiles", r"Microsoft VS Code\Code.exe")
+        ]
+        self._find_and_open("code.cmd", env_paths, "code")
         
     def open_explorer(self):
         self._open("explorer")

@@ -18,16 +18,20 @@ class Camera:
         self.frame_queue = queue.Queue(maxsize=1)
         self.frame_id = 0
         
-    def start(self):
-        if self.running:
-            return True
-            
+    def _open_capture(self):
+        if self.cap:
+            self.cap.release()
         self.cap = cv2.VideoCapture(self.index)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+        return self.cap.isOpened()
         
-        if not self.cap.isOpened():
+    def start(self):
+        if self.running:
+            return True
+            
+        if not self._open_capture():
             logger.error(f"Failed to open camera index {self.index}")
             return False
             
@@ -43,7 +47,7 @@ class Camera:
         while self.running:
             if not self.cap.isOpened():
                 time.sleep(1)
-                self.cap = cv2.VideoCapture(self.index)
+                self._open_capture()
                 continue
                 
             ret, frame = self.cap.read()

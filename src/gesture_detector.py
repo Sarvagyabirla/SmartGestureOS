@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 import time
 import threading
+import queue
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from dataclasses import dataclass
@@ -11,9 +12,8 @@ from .models import Landmark
 
 
 class GestureDetector:
-    def __init__(self, max_hands=2, detection_con=0.8, tracking_con=0.8):
-        import queue
-        self.results_queue = queue.Queue(maxsize=30)
+    def __init__(self, max_hands=1, detection_con=0.8, tracking_con=0.8):
+        self.results_queue = queue.Queue(maxsize=2)
         self.lock = threading.Lock()
         
         try:

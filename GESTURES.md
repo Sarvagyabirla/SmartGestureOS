@@ -45,7 +45,7 @@ This document outlines the strictly unique gesture mappings. Every single task i
 
 | Gesture | Action | Description |
 | :--- | :--- | :--- |
-| ☝️ **Pointing (Index Finger)** | Draw | Draw on the screen smoothly at 60 FPS. |
+| ☝️ **Pointing (Index Finger)** | Draw | Draw on the in-app canvas overlay. |
 | ✋ **Open Palm** | Hover | Move the brush cursor without drawing. |
 | ✊ **Closed Fist** | Clear Canvas | Erases everything on the canvas. |
 | ✌️ **Victory (V-Shape)** | Undo | Undo the last drawing stroke. |
@@ -55,6 +55,15 @@ This document outlines the strictly unique gesture mappings. Every single task i
 | 👎 **Thumb Down** | Toggle Eraser | Switch between the drawing brush and the eraser. |
 | 🤙 **Call Me** | Cycle Modes | Cycles between GENERAL, MEDIA, and DRAW modes. |
 
+
+## Gesture Disambiguation
+
+| Pair | How to distinguish |
+|------|-------------------|
+| **Two Fingers vs Victory** | Two Fingers = index + middle held *close together and parallel*. Victory = index + middle spread clearly apart into a V shape. |
+| **Crossed Fingers vs Two Fingers** | Crossed Fingers = index and middle genuinely overlapping/crossing. Two Fingers = side by side. |
+| **Call Me vs Rock On** | Call Me = Thumb + Pinky only (index/middle/ring folded). Rock On = Thumb + Index + Pinky (middle + ring folded). |
+
 ## Custom Gestures
 You can also train your own custom gestures using the Trainer Window in the application's UI. Once trained, custom gestures will be recognized automatically and can be mapped to any action in your profile (e.g. `profiles/default.json`).
 
@@ -62,3 +71,4 @@ You can also train your own custom gestures using the Trainer Window in the appl
 - Action gestures (like Opening Chrome, Changing Volume, etc.) require you to hold the pose steadily to execute.
 - Mouse movements like pointing, clicking, dragging, scrolling, and adjusting brightness execute **immediately and continuously**.
 - Make sure to spread your fingers for **Victory**, and keep them tight for **Two Fingers (Scroll)**!
+- Ensure good lighting for best recognition accuracy.

@@ -130,6 +130,7 @@ class MainApp:
     def processing_loop(self):
         last_frame_id = -1
         last_inference_time = 0
+        last_timestamp_ms = -1
         inference_interval = 1.0 / 30.0
         
         # Telemetry
@@ -143,6 +144,8 @@ class MainApp:
         latest_confidence = 0
         latest_action = None
         latest_progress = 0.0
+        
+        last_result_receive_time = time.perf_counter()
 
         while self.running:
             loop_start = time.perf_counter()
@@ -171,6 +174,10 @@ class MainApp:
                     # 1. Send frame to async ML if ready
                     if current_time - last_inference_time >= inference_interval:
                         timestamp_ms = int(current_time * 1000)
+                        if timestamp_ms <= last_timestamp_ms:
+                            timestamp_ms = last_timestamp_ms + 1
+                        last_timestamp_ms = timestamp_ms
+                        
                         small_frame = cv2.resize(frame, (640, 360))
                         self.detector.detect_async(small_frame, timestamp_ms)
                         last_inference_time = current_time
@@ -181,6 +188,7 @@ class MainApp:
                         result_ts, results = self.detector.results_queue.get_nowait()
 
                     if result_ts is not None:
+                        last_result_receive_time = current_time
                         latency_ms = int(time.perf_counter() * 1000) - result_ts
                         self.latency_history.append(latency_ms)
                         
@@ -191,6 +199,15 @@ class MainApp:
                         latest_stable_gesture = result_obj.gesture
                         latest_raw_gesture = result_obj.raw_gesture
                         latest_confidence = int(result_obj.confidence)
+                    elif current_time - last_result_receive_time > 0.25:
+                        if latest_hands_data is not None:
+                            logger.warning("Stale MediaPipe result timeout, clearing hands.")
+                        latest_hands_data = None
+                        latest_stable_gesture = "Unknown"
+                        latest_raw_gesture = "Unknown"
+                        latest_confidence = 0
+                        # Also tell the classifier that hands are lost so its state resets
+                        self.classifier.classify([])
                         
                     # 3. Always apply mapper (for continuous tracking like mouse move) and draw on CURRENT frame
                     display_frame = frame.copy() # One copy for display safety if drawing
