@@ -1,0 +1,75 @@
+name: Build — Windows Installer
+
+on:
+  push:
+    branches: ["main", "production/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build PyInstaller + Inno Setup
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install production + build dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Verify no dependency conflicts
+        run: pip check
+
+      - name: Run tests (must pass before build)
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Syntax check (compileall)
+        run: python -m compileall -q main.py config.py src
+
+      - name: Build with PyInstaller
+        run: |
+          python -m PyInstaller --noconfirm --clean packaging/windows/SmartGesture.spec
+
+      - name: Verify executable exists
+        run: |
+          if (!(Test-Path "dist\SmartGestureOS\SmartGestureOS.exe")) {
+            Write-Error "EXE not found after PyInstaller build!"
+            exit 1
+          }
+          Write-Host "EXE size: $((Get-Item 'dist\SmartGestureOS\SmartGestureOS.exe').Length) bytes"
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build installer (Inno Setup)
+        run: |
+          iscc packaging\windows\SmartGestureOS.iss
+
+      - name: Verify installer exists
+        run: |
+          $installer = Get-Item "dist\SmartGestureOS_Setup*.exe" -ErrorAction SilentlyContinue
+          if (-not $installer) {
+            Write-Error "Installer not found!"
+            exit 1
+          }
+          Write-Host "Installer: $($installer.Name) ($($installer.Length) bytes)"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartGestureOS-Windows-build-${{ github.sha }}
+          path: |
+            dist/SmartGestureOS_Setup*.exe
+          retention-days: 30

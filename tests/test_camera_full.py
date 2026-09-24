@@ -13,9 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 def _mock_cap(opened=True, read_ok=True):
     """Build a mock VideoCapture."""
+    import numpy as np
     cap = MagicMock()
     cap.isOpened.return_value = opened
-    frame = MagicMock()
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
     cap.read.return_value = (read_ok, frame)
     cap.set = MagicMock()
     cap.release = MagicMock()
@@ -124,7 +125,9 @@ def test_camera_reconnect_reapplies_settings():
 
         # Simulate isOpened returning False once then True
         real_cap.isOpened.side_effect = [True, False, True, True, True]
-        real_cap.read.return_value = (True, MagicMock())
+        import numpy as np
+        fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        real_cap.read.return_value = (True, fake_frame)
 
         with patch.object(cam, "_open_capture", wraps=cam._open_capture) as mock_reopen:
             cam.start()

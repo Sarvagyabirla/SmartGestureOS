@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartGestureOS — Control Windows With Your Hands</title>
+  <meta name="description" content="SmartGestureOS lets you control your Windows PC with hand gestures — no special hardware, just your webcam. Free, open-source, local-only.">
+  <meta property="og:title" content="SmartGestureOS — Gesture Control for Windows">
+  <meta property="og:description" content="Control your Windows PC with hand gestures. No cloud, no account, no special hardware. Free and open-source.">
+  <meta property="og:image" content="assets/hero.jpg">
+  <meta name="theme-color" content="#0d0d1a">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-deep: #060610;
+      --bg-card: rgba(255,255,255,0.04);
+      --accent-blue: #4f8fff;
+      --accent-violet: #9d4eff;
+      --accent-cyan: #00d4ff;
+      --text-primary: #f0f0ff;
+      --text-secondary: rgba(240,240,255,0.6);
+      --border: rgba(255,255,255,0.08);
+      --glow-blue: 0 0 60px rgba(79,143,255,0.25);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Background grid ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(79,143,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(79,143,255,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+      background: rgba(6,6,16,0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-violet));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-links { display: flex; gap: 2rem; list-style: none; }
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1.4rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.25s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-violet));
+      color: #fff;
+      box-shadow: 0 4px 24px rgba(79,143,255,0.35);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(79,143,255,0.5);
+    }
+
+    .btn-ghost {
+      background: var(--bg-card);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    /* ── Hero ── */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 8rem 2rem 4rem;
+      z-index: 1;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 1rem;
+      border-radius: 100px;
+      background: rgba(79,143,255,0.1);
+      border: 1px solid rgba(79,143,255,0.3);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent-blue);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 7vw, 5rem);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -2px;
+      margin-bottom: 1.5rem;
+      max-width: 900px;
+    }
+
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue), var(--accent-violet));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin: 0 auto 2.5rem;
+      font-weight: 400;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .hero-image {
+      margin-top: 4rem;
+      width: 100%;
+      max-width: 900px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: var(--glow-blue), 0 40px 80px rgba(0,0,0,0.6);
+      position: relative;
+    }
+
+    .hero-image img {
+      width: 100%;
+      display: block;
+    }
+
+    /* ── Features ── */
+    .section {
+      position: relative;
+      z-index: 1;
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent-blue);
+      margin-bottom: 0.75rem;
+    }
+
+    .section h2 {
+      font-size: clamp(1.8rem, 4vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 1rem;
+    }
+
+    .section > p {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      max-width: 600px;
+      margin-bottom: 3rem;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.75rem;
+      transition: all 0.3s;
+    }
+
+    .feature-card:hover {
+      border-color: rgba(79,143,255,0.3);
+      background: rgba(79,143,255,0.06);
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+
+    .feature-icon {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      display: block;
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature-card p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    /* ── Gesture grid ── */
+    .gesture-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+    }
+
+    .gesture-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      text-align: center;
+      transition: all 0.25s;
+    }
+
+    .gesture-item:hover {
+      border-color: rgba(157,78,255,0.4);
+      background: rgba(157,78,255,0.06);
+    }
+
+    .gesture-emoji { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
+    .gesture-name { font-size: 0.85rem; font-weight: 600; display: block; }
+    .gesture-action { font-size: 0.75rem; color: var(--text-secondary); }
+
+    /* ── Privacy callout ── */
+    .privacy-callout {
+      position: relative;
+      z-index: 1;
+      margin: 0 auto;
+      max-width: 1100px;
+      padding: 0 2rem 4rem;
+    }
+
+    .privacy-box {
+      background: linear-gradient(135deg, rgba(79,143,255,0.08), rgba(157,78,255,0.08));
+      border: 1px solid rgba(79,143,255,0.2);
+      border-radius: 20px;
+      padding: 3rem;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .privacy-icon { font-size: 3rem; }
+
+    .privacy-content h3 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .privacy-content p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    /* ── Download ── */
+    .download-section {
+      position: relative;
+      z-index: 1;
+      padding: 6rem 2rem;
+      text-align: center;
+      background: radial-gradient(ellipse at center, rgba(79,143,255,0.08) 0%, transparent 70%);
+    }
+
+    .download-section h2 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -1px;
+      margin-bottom: 1rem;
+    }
+
+    .download-section p {
+      color: var(--text-secondary);
+      max-width: 500px;
+      margin: 0 auto 2.5rem;
+    }
+
+    .download-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ── Footer ── */
+    footer {
+      position: relative;
+      z-index: 1;
+      border-top: 1px solid var(--border);
+      padding: 2rem;
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+    }
+
+    footer a { color: var(--accent-blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── Scroll animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-up {
+      animation: fadeUp 0.7s ease both;
+    }
+
+    .delay-1 { animation-delay: 0.1s; }
+    .delay-2 { animation-delay: 0.2s; }
+    .delay-3 { animation-delay: 0.3s; }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <span class="nav-logo">⚡ SmartGestureOS</span>
+    <ul class="nav-links">
+      <li><a href="#features">Features</a></li>
+      <li><a href="#gestures">Gestures</a></li>
+      <li><a href="#privacy">Privacy</a></li>
+      <li><a href="#download">Download</a></li>
+    </ul>
+    <a href="https://github.com/Sarvagyabirla/SmartGestureOS" class="btn btn-ghost" target="_blank" rel="noopener">
+      GitHub ↗
+    </a>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-badge animate-up">🔴 Live &nbsp;|&nbsp; Open Source &nbsp;|&nbsp; Windows 10/11</div>
+
+    <h1 class="animate-up delay-1">
+      Control Windows<br><span class="gradient">With Your Hands</span>
+    </h1>
+
+    <p class="animate-up delay-2">
+      SmartGestureOS turns your webcam into a gesture controller.
+      Move the mouse, click, scroll, open apps — no touching required.
+      Runs entirely on your device. No cloud. No account.
+    </p>
+
+    <div class="hero-actions animate-up delay-3">
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS/releases/latest" class="btn btn-primary" id="download-hero-btn">
+        ⬇️ Download Free
+      </a>
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS" class="btn btn-ghost" target="_blank" rel="noopener">
+        View Source
+      </a>
+    </div>
+
+    <div class="hero-image animate-up delay-3">
+      <img src="assets/hero.jpg" alt="SmartGestureOS hand landmark detection and Windows gesture control" loading="lazy">
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="section" id="features">
+    <p class="section-label">Capabilities</p>
+    <h2>Everything You Need to Go Hands-Free</h2>
+    <p>SmartGestureOS integrates deeply with Windows without requiring any special hardware or drivers.</p>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <span class="feature-icon">🖱️</span>
+        <h3>Precision Mouse Control</h3>
+        <p>Index finger controls the cursor with 1€ filter smoothing. Pinch to click, hold to drag, two-finger scroll.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📻</span>
+        <h3>Media Mode</h3>
+        <p>Play/pause, skip tracks, and mute — all without touching your keyboard. Snap into Media mode instantly.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🎨</span>
+        <h3>Air Drawing</h3>
+        <p>Switch to Draw mode and paint in the air. Undo, redo, cycle colors, save to PNG — with hand gestures only.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🚀</span>
+        <h3>App Launcher</h3>
+        <p>Open Chrome, VS Code, Calculator, and more. Volume up/down, screenshot, lock PC — all mapped to gestures.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🧠</span>
+        <h3>Custom Gesture Trainer</h3>
+        <p>Train your own gestures with a few samples. Translation-, rotation-, and scale-invariant normalization ensures robustness.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔒</span>
+        <h3>Private by Design</h3>
+        <p>Zero network access. Camera frames never touch disk. No account. No telemetry. Runs on your CPU/GPU only.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gestures -->
+  <section class="section" id="gestures">
+    <p class="section-label">Gesture Library</p>
+    <h2>15+ Built-In Gestures</h2>
+    <p>Each mode has its own gesture set. Switch modes using the Call Me gesture.</p>
+
+    <div class="gesture-grid">
+      <div class="gesture-item">
+        <span class="gesture-emoji">👆</span>
+        <span class="gesture-name">Pointing</span>
+        <span class="gesture-action">Move cursor</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">🤏</span>
+        <span class="gesture-name">Pinch</span>
+        <span class="gesture-action">Click / Drag</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">✌️</span>
+        <span class="gesture-name">Two Fingers</span>
+        <span class="gesture-action">Scroll</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">🤟</span>
+        <span class="gesture-name">Three Fingers</span>
+        <span class="gesture-action">Right-click</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">✋</span>
+        <span class="gesture-name">Open Palm</span>
+        <span class="gesture-action">Task View</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">✊</span>
+        <span class="gesture-name">Closed Fist</span>
+        <span class="gesture-action">Show Desktop</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">👍</span>
+        <span class="gesture-name">Thumb Up</span>
+        <span class="gesture-action">Volume Up</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">👎</span>
+        <span class="gesture-name">Thumb Down</span>
+        <span class="gesture-action">Volume Down</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">✌</span>
+        <span class="gesture-name">Victory</span>
+        <span class="gesture-action">Open VS Code</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">🤘</span>
+        <span class="gesture-name">Rock On</span>
+        <span class="gesture-action">Open Chrome</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">🤙</span>
+        <span class="gesture-name">Call Me</span>
+        <span class="gesture-action">Switch Mode</span>
+      </div>
+      <div class="gesture-item">
+        <span class="gesture-emoji">🖐️</span>
+        <span class="gesture-name">Four Fingers</span>
+        <span class="gesture-action">Screenshot</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy Callout -->
+  <div class="privacy-callout" id="privacy">
+    <div class="privacy-box">
+      <span class="privacy-icon">🛡️</span>
+      <div class="privacy-content">
+        <h3>100% Local. Zero Data Collected.</h3>
+        <p>
+          SmartGestureOS processes everything on your device. Your camera frames
+          are never saved or transmitted. There is no internet connection, no account,
+          no analytics, and no telemetry of any kind.
+          <a href="https://github.com/Sarvagyabirla/SmartGestureOS/blob/main/PRIVACY.md" style="color: var(--accent-blue);">Read the full Privacy Policy →</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Download -->
+  <section class="download-section" id="download">
+    <h2>Ready to Go Hands-Free?</h2>
+    <p>Download the installer for Windows 10/11 (64-bit). No Python required. No admin account needed after install.</p>
+    <div class="download-actions">
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS/releases/latest" class="btn btn-primary" id="download-cta-btn">
+        ⬇️ Download for Windows
+      </a>
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS#readme" class="btn btn-ghost" target="_blank" rel="noopener">
+        📖 Read the Docs
+      </a>
+    </div>
+    <p style="margin-top: 1.5rem; font-size: 0.8rem; color: rgba(240,240,255,0.35);">
+      MIT License &nbsp;·&nbsp; Free forever &nbsp;·&nbsp; Open source
+    </p>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>
+      Built by <a href="https://github.com/Sarvagyabirla" target="_blank" rel="noopener">Sarvagya Birla</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/Sarvagyabirla/SmartGestureOS/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">Third-Party Notices</a>
+    </p>
+  </footer>
+
+</body>
+</html>

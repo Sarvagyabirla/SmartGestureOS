@@ -6,15 +6,17 @@ Write-Host "Cleaning previous builds..."
 if (Test-Path "build")  { Remove-Item -Recurse -Force "build" }
 if (Test-Path "dist")   { Remove-Item -Recurse -Force "dist" }
 
-Write-Host "Running pre-build validation..."
-python -m compileall -q main.py config.py src
+$pythonExe = if (Test-Path ".\.venv\Scripts\python.exe") { ".\.venv\Scripts\python.exe" } else { "python" }
+
+Write-Host "Running pre-build validation with $pythonExe..."
+& $pythonExe -m compileall -q main.py config.py src
 if ($LASTEXITCODE -ne 0) {
     Write-Host "FAIL: compileall found syntax errors. Aborting." -ForegroundColor Red
     exit 1
 }
 
 Write-Host "Running PyInstaller (ONEDIR)..."
-python -m PyInstaller --noconfirm --clean .\packaging\windows\SmartGesture.spec
+& $pythonExe -m PyInstaller --noconfirm --clean .\packaging\windows\SmartGesture.spec
 
 if ($LASTEXITCODE -eq 0) {
     $exe = "dist\SmartGestureOS\SmartGestureOS.exe"

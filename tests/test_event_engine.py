@@ -271,3 +271,59 @@ def test_right_click():
     right_clicks = [c for c in user32.mouse_event.call_args_list
                     if c[0][0] in (0x0008, 0x0010)]
     assert len(right_clicks) >= 2, "Expected RIGHTDOWN + RIGHTUP"
+
+
+# ---------------------------------------------------------------------------
+# TEST 10: Right-click release gate (F-06 fix)
+# ---------------------------------------------------------------------------
+
+def test_right_click_no_repeat_while_held():
+    """
+    Three Fingers held continuously must not fire a second right-click,
+    even after COOLDOWN expires. Only after Three Fingers is released and
+    re-entered should a new right-click be allowed.
+    """
+    engine, mc, vm, user32 = _make_engine()
+    from src.event_engine import EventState
+
+    lms = _lms()
+
+    # First press → right-click fires
+    engine.process("Three Fingers", "Three Fingers", 500, 400, 1280, 720, lms)
+    assert engine.state == EventState.COOLDOWN
+
+    right_click_count_after_first = len([
+        c for c in user32.mouse_event.call_args_list
+        if c[0][0] in (0x0008, 0x0010)
+    ])
+    assert right_click_count_after_first >= 2, "Expected at least one right-click"
+
+    # Advance time past cooldown to let engine return to HOVER
+    engine.last_state_change -= (engine.cooldown_duration + 0.1)
+    engine.process("Three Fingers", "Three Fingers", 500, 400, 1280, 720, lms)
+    # Should be back in HOVER or COOLDOWN, but NOT fire a second right-click
+    right_click_count_held = len([
+        c for c in user32.mouse_event.call_args_list
+        if c[0][0] in (0x0008, 0x0010)
+    ])
+    assert right_click_count_held == right_click_count_after_first, (
+        "F-06: Second right-click fired while Three Fingers still held! "
+        f"Expected {right_click_count_after_first} events, got {right_click_count_held}"
+    )
+
+    # Now release Three Fingers (any other gesture)
+    engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
+    # Ensure cooldown clears
+    engine.last_state_change -= (engine.cooldown_duration + 0.1)
+    engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
+    assert engine.state == EventState.HOVER
+
+    # Re-enter Three Fingers — should fire a new right-click
+    engine.process("Three Fingers", "Three Fingers", 500, 400, 1280, 720, lms)
+    right_click_count_second = len([
+        c for c in user32.mouse_event.call_args_list
+        if c[0][0] in (0x0008, 0x0010)
+    ])
+    assert right_click_count_second > right_click_count_after_first, (
+        "F-06: After release+re-enter, a new right-click should have fired"
+    )

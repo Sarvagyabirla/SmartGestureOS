@@ -61,7 +61,7 @@ def create_hand(fingers_up):
     return [{'landmarks': lms_3d, 'score': 99}]
 
 def check(fingers, expected):
-    c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
+    c = GestureClassifier(confidence_threshold=50)  # F-12: hold_time_ms removed
     # Pump to get past hold time
     for _ in range(5):
         c.classify(create_hand(fingers))
@@ -93,7 +93,7 @@ def test_victory():
     # Make middle point right
     h['landmarks'][12] = Landmark(id=12, pixel_x=70, pixel_y=50, x=0.7, y=0.5, z=0.0)
     
-    c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
+    c = GestureClassifier(confidence_threshold=50)  # F-12: hold_time_ms removed
     for _ in range(5):
         c.classify([h])
     res = c.classify([h]).gesture
@@ -105,7 +105,7 @@ def test_crossed_fingers():
     h['landmarks'][8] = Landmark(id=8, pixel_x=41, pixel_y=h['landmarks'][8].pixel_y, x=0.41, y=h['landmarks'][8].y, z=0.0)
     h['landmarks'][12] = Landmark(id=12, pixel_x=39, pixel_y=h['landmarks'][12].pixel_y, x=0.39, y=h['landmarks'][12].y, z=0.0)
     
-    c = GestureClassifier(confidence_threshold=50, hold_time_ms=0)
+    c = GestureClassifier(confidence_threshold=50)  # F-12: hold_time_ms removed
     for _ in range(5):
         c.classify([h])
     res = c.classify([h]).gesture

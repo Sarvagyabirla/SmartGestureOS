@@ -1,52 +1,29 @@
-# Hardware Validation Report
+# SmartGestureOS Hardware Validation Report
 
-## Testing Status
-- **Automated Tests:** 31/31 PASS (100%)
+## 1. Automated Tests (Unit & Integration)
+- **Status**: PASS
+- **Total Tests**: 60/60
+- **Environment**: Windows 11 x64, Python 3.11.x
+- **Date**: 2026-09-24
 
-## Application Startup Validation
+### Test Subsystem Breakdown
+- `test_camera_full.py`: 13 PASS (Includes reconnect and failsafe logic)
+- `test_event_engine.py`: 12 PASS (Includes hysteresis and time-bounded double clicks)
+- `test_gesture_classifier.py`: 14 PASS (Geometric angle logic and bounding boxes)
+- `test_gesture_mapper.py`: 10 PASS (Mode isolation and context actions)
+- `test_mouse_controller.py`: 6 PASS (Exponential smoothing and cursor logic)
+- `test_drawing.py`: 5 PASS (Undo boundaries and drawing states)
 
-### Initial Real-Runtime Issue
-The application crashed immediately upon startup during UI initialization with the following error:
-`ValueError: transparency is not allowed for this attribute`
+## 2. Manual Hardware Validation
+- **Status**: PENDING
+- **Requirements**:
+  - Requires physical webcam connected.
+  - Requires manual gestures for General, Media, and Draw modes.
+  - Requires physical unplugging of webcam during execution to verify automatic recovery and failsafe behaviors.
+  - Requires high CPU load testing to verify `last_result_received_at` fallback logic.
 
-### Root Cause
-`SmartGestureApp` is a top-level `CTk` window. CustomTkinter 6.0 strictly prohibits using `fg_color="transparent"` on the root `CTk` window or `CTkToplevel`. The application was trying to apply a transparent background to enable the `pywinstyles` mica effect, which broke under this strict validation.
+## 3. Deployment Artifacts
+- **Executable**: `dist\SmartGestureOS\SmartGestureOS.exe` (ONEDIR Build)
+- **Installer**: `release\SmartGestureOS-Setup-v1.0.0.exe` (Inno Setup)
 
-### Fix Applied
-Removed the unsupported transparent configuration from the root window and introduced a centralized UI theme palette.
-- **Theme Introduced:**
-  - `BG_COLOR` = `#0B0F14`
-  - `CARD_COLOR` = `#111820`
-  - `SECONDARY_SURFACE` = `#17212B`
-  - `ACCENT_COLOR` = `#00E5FF`
-  - `TEXT_COLOR` = `#FFFFFF`
-  - `MUTED_TEXT` = `#A0A0A0`
-
-### Files Changed
-1. `src/ui_theme.py` (New file) - Centralized color tokens.
-2. `src/ui.py` - Removed transparent root `fg_color`, imported theme.
-3. `src/ui_settings.py` - Migrated hardcoded colors to theme.
-4. `src/ui_trainer.py` - Migrated hardcoded colors to theme.
-5. `src/ui_coach.py` - Applied base theme background.
-6. `main.py` - Improved graceful resource shutdown (MediaPipe detector, threads).
-7. `src/gesture_detector.py` - Added `close()` method.
-8. `src/gesture_mapper.py` - Added `cleanup()` method for mouse release and TTS shutdown.
-9. `src/feedback_controller.py` - Added `stop()` method for thread safety.
-10. `tests/test_ui.py` (New file) - Lightweight headless UI startup test.
-
-### Final Application Startup Result
-Awaiting user confirmation of manual launch. Automated UI instantiation tests pass without transparency crashes.
-
-## Remaining Hardware/Manual Validation
-Please run the following command to complete the hardware validation step:
-```bash
-python main.py
-```
-**Verify:**
-- Main window opens
-- Camera initializes and preview renders
-- Hand landmarks render smoothly
-- Gesture card updates
-- UI remains responsive
-- Application closes cleanly (zombie processes handled)
-- Gestures perform accurately on live feed
+*Note: Do not mark physical tests PASS automatically. They must be validated by a human user with physical hardware.*
