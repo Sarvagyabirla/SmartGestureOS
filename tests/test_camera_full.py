@@ -5,15 +5,17 @@ No physical webcam required.
 """
 import sys
 import time
+import threading
+import cv2
+import numpy as np
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _mock_cap(opened=True, read_ok=True):
     """Build a mock VideoCapture."""
-    import numpy as np
     cap = MagicMock()
     cap.isOpened.return_value = opened
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -33,7 +35,7 @@ def test_camera_initial_open_success():
         time.sleep(0.05)
         cam.stop()
     assert result is True
-    assert cam.running is False  # stopped after stop()
+    assert cam.running is False
 
 
 def test_camera_initial_open_failure():
@@ -49,8 +51,6 @@ def test_camera_initial_open_failure():
 
 def test_camera_applies_resolution():
     """Camera applies width, height and fps via CAP_PROP_* constants."""
-    import cv2
-    import numpy as np
     mock_cap = _mock_cap(opened=True)
     fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
     mock_cap.read.return_value = (True, fake_frame)
@@ -63,12 +63,10 @@ def test_camera_applies_resolution():
         time.sleep(0.05)
         cam.stop()
 
-    # set_calls is a set of (prop_id, value) tuples
     set_call_ids = {call[0][0] for call in mock_cap.set.call_args_list}
-    assert cv2.CAP_PROP_FRAME_WIDTH in set_call_ids
+    assert cv2.CAP_PROP_FRAME_WIDTH  in set_call_ids
     assert cv2.CAP_PROP_FRAME_HEIGHT in set_call_ids
-    assert cv2.CAP_PROP_FPS in set_call_ids
-
+    assert cv2.CAP_PROP_FPS          in set_call_ids
 
 
 def test_camera_open_capture_helper_releases_old():
@@ -112,26 +110,114 @@ def test_camera_is_connected_after_read():
 
 
 def test_camera_reconnect_reapplies_settings():
-    """When isOpened() returns False in _update, _open_capture is called."""
-    import cv2
-    call_count = [0]
+    """
+    Verify that when isOpened() returns False the _update thread calls
+    _open_capture again (reconnect), which reapplies width/height/fps.
+
+    Synchronization design (deterministic, no StopIteration):
+    ──────────────────────────────────────────────────────────
+    A finite side_effect list is UNSAFE here because the background capture
+    thread calls isOpened() in a tight loop — it exhausts the list and raises
+    StopIteration, producing PytestUnhandledThreadExceptionWarning.
+
+    Instead we use a stateful callable (closure over a list-cell):
+
+        phase 0 → isOpened() → True   (thread runs normally)
+        phase 1 → isOpened() → False, then atomically advances to phase 2
+        phase 2 → isOpened() → True forever
+
+    The phase-1→2 advance is done *inside* the callable, so only one False
+    is ever returned.  Two threading.Events gate progress:
+
+        first_frame_event  — set when the thread reads its first good frame
+                             (proves the capture loop is live before we inject
+                              the disconnect)
+        reconnect_event    — set when _open_capture is called a second time
+                             (proves reconnect logic fired)
+    """
+    # ── Shared state ──────────────────────────────────────────────────────────
+    phase = [0]               # list-cell so closures can mutate it
+    first_frame_event = threading.Event()
+    reconnect_event   = threading.Event()
+    open_capture_calls = [0]
+
+    # ── Build the mock cap ────────────────────────────────────────────────────
     real_cap = _mock_cap(opened=True)
 
-    original_open = None  # Not used but ensures patch is clean
+    # isOpened: stateful callable — never raises StopIteration
+    def _is_opened():
+        if phase[0] == 0:
+            return True
+        if phase[0] == 1:
+            # Return False exactly once; advance phase so the very next call
+            # (from _open_capture itself) sees True and reconnect succeeds.
+            phase[0] = 2
+            return False
+        return True   # phase 2+: stable True forever
 
-    with patch("cv2.VideoCapture", return_value=real_cap):
+    real_cap.isOpened.side_effect = _is_opened
+
+    # read: signals first_frame_event on first successful call
+    fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    _read_calls = [0]
+
+    def _read():
+        _read_calls[0] += 1
+        if _read_calls[0] == 1:
+            first_frame_event.set()
+        return (True, fake_frame)
+
+    real_cap.read.side_effect = _read
+
+    # ── Run ───────────────────────────────────────────────────────────────────
+    with patch("cv2.VideoCapture", return_value=real_cap), \
+         patch("cv2.flip", return_value=fake_frame):
         from src.camera import Camera
         cam = Camera(index=0, width=1280, height=720, fps=30)
 
-        # Simulate isOpened returning False once then True
-        real_cap.isOpened.side_effect = [True, False, True, True, True]
-        import numpy as np
-        fake_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        real_cap.read.return_value = (True, fake_frame)
+        # Wrap _open_capture to count calls and signal reconnect_event
+        _orig_open = cam._open_capture
 
-        with patch.object(cam, "_open_capture", wraps=cam._open_capture) as mock_reopen:
-            cam.start()
-            time.sleep(0.2)
-            cam.stop()
-            # _open_capture should have been called at least once during reconnect
-            assert mock_reopen.call_count >= 1
+        def _tracked_open():
+            open_capture_calls[0] += 1
+            result = _orig_open()
+            if open_capture_calls[0] >= 2:
+                reconnect_event.set()
+            return result
+
+        cam._open_capture = _tracked_open
+
+        # start() calls _open_capture #1 synchronously
+        cam.start()
+
+        # Gate 1: wait until the background thread has produced at least one
+        # frame (proves the read loop is live).
+        assert first_frame_event.wait(timeout=3.0), (
+            "Thread never read a frame — camera start() appears broken"
+        )
+
+        # Inject disconnect: next isOpened() call returns False (phase 1→2)
+        phase[0] = 1
+
+        # Gate 2: wait for the thread to detect the False, call _open_capture
+        # again, and signal reconnect_event.
+        reconnect_happened = reconnect_event.wait(timeout=3.0)
+
+        cam.stop()
+
+    # ── Assertions ────────────────────────────────────────────────────────────
+    assert reconnect_happened, (
+        f"Reconnect not detected within timeout. "
+        f"_open_capture calls: {open_capture_calls[0]}, phase: {phase[0]}"
+    )
+    assert open_capture_calls[0] >= 2, (
+        f"Expected ≥ 2 _open_capture calls, got {open_capture_calls[0]}"
+    )
+
+    # cap.set() must have been called with width/height/fps on reconnect
+    set_call_ids = {call[0][0] for call in real_cap.set.call_args_list}
+    assert cv2.CAP_PROP_FRAME_WIDTH  in set_call_ids, "Width not reapplied on reconnect"
+    assert cv2.CAP_PROP_FRAME_HEIGHT in set_call_ids, "Height not reapplied on reconnect"
+    assert cv2.CAP_PROP_FPS          in set_call_ids, "FPS not reapplied on reconnect"
+
+    assert cam.running is False, "Camera should be stopped after stop()"
