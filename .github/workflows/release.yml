@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
 
 permissions:
   contents: write
@@ -16,21 +18,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate tag matches version.py
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $version = python -c "from src.version import __version__; print(__version__)"
-          if ($tag -ne "v$version") {
-            Write-Error "Tag $tag does not match src/version.py version v$version"
-            exit 1
-          }
-          Write-Host "Version validated: $version"
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
+
+      - name: Validate tag matches src/version.py (§51)
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = python -c "from src.version import __version__; print(__version__)"
+          $expected_tag = "v$version"
+          # Accept exact match or prerelease suffix match
+          if ($tag -ne $expected_tag -and -not $tag.StartsWith("$expected_tag-")) {
+            Write-Error "Tag $tag does not match src/version.py version v$version"
+            exit 1
+          }
+          Write-Host "Version validated: $version (tag: $tag)"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+        id: validate
+
+      - name: Determine if prerelease
+        id: prerelease
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $isPrerelease = $tag -match "-beta\.|rc\."
+          echo "is_prerelease=$($isPrerelease.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Prerelease: $isPrerelease"
 
       - name: Install dependencies
         run: |
@@ -40,8 +54,11 @@ jobs:
       - name: Verify pip check
         run: pip check
 
+      - name: Syntax check
+        run: python -m compileall -q main.py config.py src
+
       - name: Run tests
-        run: python -m pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -v --tb=short -m "not hardware"
 
       - name: Build PyInstaller bundle
         run: |
@@ -50,39 +67,62 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      - name: Build installer
-        run: iscc packaging\windows\SmartGestureOS.iss
+      - name: Build installer with dynamic version
+        run: |
+          $ver = "${{ steps.validate.outputs.version }}"
+          iscc /DAppVersion=$ver packaging\windows\SmartGestureOS.iss
 
-      - name: Get installer name
+      - name: Verify installer (§49)
         id: installer
         run: |
-          $path = (Get-Item "dist\SmartGestureOS_Setup*.exe").FullName
-          echo "path=$path" >> $env:GITHUB_OUTPUT
-          echo "name=$(Split-Path $path -Leaf)" >> $env:GITHUB_OUTPUT
+          $installer = Get-Item "dist\release\SmartGestureOS-Setup-v*.exe" -ErrorAction SilentlyContinue
+          if (-not $installer) {
+            Write-Error "Installer not found in dist\release\"
+            exit 1
+          }
+          if ($installer.Length -eq 0) {
+            Write-Error "Installer is empty!"
+            exit 1
+          }
+          Write-Host "Installer: $($installer.Name) ($($installer.Length) bytes)"
+          echo "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          echo "name=$($installer.Name)" >> $env:GITHUB_OUTPUT
 
       - name: Compute SHA-256
         id: sha256
         run: |
           $hash = (Get-FileHash "${{ steps.installer.outputs.path }}" -Algorithm SHA256).Hash
           echo "hash=$hash" >> $env:GITHUB_OUTPUT
-          echo "$hash  ${{ steps.installer.outputs.name }}" > dist\SHA256SUMS.txt
+          echo "$hash  ${{ steps.installer.outputs.name }}" > dist\release\SHA256SUMS.txt
+          Write-Host "SHA-256: $hash"
 
-      - name: Extract changelog entry for this release
+      - name: Extract changelog entry for this release (§62)
         id: changelog
         run: |
           $content = Get-Content CHANGELOG.md -Raw
-          # Extract the first version block
-          $match = [regex]::Match($content, '## \[([^\]]+)\].*?\n(.*?)(?=\n## |\z)', [System.Text.RegularExpressions.RegexOptions]::Singleline)
-          $body = if ($match.Success) { $match.Groups[2].Value.Trim() } else { "See CHANGELOG.md for release notes." }
-          $body | Out-File -FilePath dist\release_notes.txt -Encoding utf8
+          $version = "${{ steps.validate.outputs.version }}"
+          # Try to find a block matching the current version tag
+          $match = [regex]::Match($content, "## \[$version\][^\n]*\n(.*?)(?=\n## |\z)", [System.Text.RegularExpressions.RegexOptions]::Singleline)
+          if (-not $match.Success) {
+            # Fallback: first version block (may be [Unreleased])
+            $match = [regex]::Match($content, '## \[([^\]]+)\][^\n]*\n(.*?)(?=\n## |\z)', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+          }
+          $body = if ($match.Success) {
+            if ($match.Groups.Count -gt 2) { $match.Groups[2].Value.Trim() }
+            else { $match.Groups[1].Value.Trim() }
+          } else {
+            "See CHANGELOG.md for release notes."
+          }
+          $body | Out-File -FilePath dist\release\release_notes.txt -Encoding utf8
           echo "notes<<EOF" >> $env:GITHUB_OUTPUT
-          Get-Content dist\release_notes.txt >> $env:GITHUB_OUTPUT
+          Get-Content dist\release\release_notes.txt >> $env:GITHUB_OUTPUT
           echo "EOF" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: SmartGestureOS ${{ github.ref_name }}
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
           body: |
             ## SmartGestureOS ${{ github.ref_name }}
 
@@ -96,6 +136,5 @@ jobs:
             > Click "More info" → "Run anyway" to proceed. We are working on obtaining a code-signing certificate.
           files: |
             ${{ steps.installer.outputs.path }}
-            dist/SHA256SUMS.txt
+            dist/release/SHA256SUMS.txt
           draft: false
-          prerelease: false

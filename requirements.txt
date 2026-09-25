@@ -1,4 +1,10 @@
-opencv-python==5.0.0.93
+# SmartGestureOS — production requirements
+#
+# OpenCV: mediapipe 0.10.x requires opencv-contrib-python and will install it
+# as a transitive dependency. We do NOT pin opencv-python here to avoid the
+# dual-cv2-wheel collision (§30). opencv-contrib-python is the single cv2 wheel.
+# If mediapipe's transitive pin drifts, pin it explicitly here.
+opencv-contrib-python==5.0.0.93
 mediapipe==0.10.35
 keyboard==0.13.5
 customtkinter==6.0.0
@@ -11,4 +17,4 @@ comtypes==1.4.16
 pyttsx3==2.99
 pywinstyles==1.8
 platformdirs==4.11.7
-psutil>=5.9.0
+psutil==7.0.0

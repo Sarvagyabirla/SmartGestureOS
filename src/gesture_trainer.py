@@ -37,8 +37,9 @@ def validate_gesture_name(name: str) -> tuple[bool, str]:
             "Gesture name may only contain letters, numbers, spaces, "
             "underscores, and hyphens (max 32 characters)."
         )
-    if name in _BUILTIN_GESTURE_NAMES:
-        return False, f"'{name}' is a built-in gesture name and cannot be overwritten."
+    # Case-insensitive check: 'pinch' must not shadow 'Pinch' (§20)
+    if name.lower() in {n.lower() for n in _BUILTIN_GESTURE_NAMES}:
+        return False, f"'{name}' conflicts with a built-in gesture name and cannot be used."
     return True, ""
 
 

@@ -30,11 +30,27 @@ class GestureDetector:
                 min_tracking_confidence=tracking_con
             )
             self.detector = vision.HandLandmarker.create_from_options(options)
+            self.available: bool = True
+            self.error: str | None = None
             logger.info("HandLandmarker initialized successfully in LIVE_STREAM mode.")
         except Exception as e:
             logger.error(f"Failed to initialize HandLandmarker: {e}")
             self.detector = None
-            
+            self.available: bool = False
+            self.error: str = str(e)
+
+    def clear_results(self) -> None:
+        """Drain all queued results to invalidate pre-reset callbacks (§9)."""
+        drained = 0
+        while not self.results_queue.empty():
+            try:
+                self.results_queue.get_nowait()
+                drained += 1
+            except queue.Empty:
+                break
+        if drained:
+            logger.debug(f"GestureDetector: cleared {drained} stale result(s).")
+
     def _result_callback(self, result: vision.HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
         try:
             if self.results_queue.full():

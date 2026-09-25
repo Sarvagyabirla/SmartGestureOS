@@ -4,6 +4,10 @@ ShortcutController — safe Windows application launcher.
 Uses shell=False with explicit executable paths wherever possible.
 Falls back to os.startfile for simple system apps.
 Never passes user-supplied strings to shell commands.
+
+All public methods return ActionResult.
+window management methods (snap_left/right, maximize/minimize) now
+return ActionResult and catch keyboard.send() failures.
 """
 
 import os
@@ -23,9 +27,9 @@ _BUILTIN_APP_NAMES = frozenset({
 
 class ShortcutController:
     def __init__(self):
-        # Use perf_counter for monotonic rate-limiting (F-03 fix)
-        self._last_open_time = 0.0
-        self._open_cooldown = 2.0  # seconds between launches
+        # Use perf_counter for monotonic rate-limiting
+        self._last_open_time: float = 0.0
+        self._open_cooldown: float = 2.0  # seconds between launches
 
     # ── Internal launcher (shell=False) ──────────────────────────────────────
 
@@ -42,7 +46,7 @@ class ShortcutController:
 
         try:
             cmd = [exe_path] + (args or [])
-            subprocess.Popen(cmd, shell=False)  # F-07: shell=False
+            subprocess.Popen(cmd, shell=False)  # shell=False — no injection risk
             self._last_open_time = now
             logger.info(f"Launched: {exe_path}")
             return ActionResult(True, "launch", f"Launched {os.path.basename(exe_path)}")
@@ -82,6 +86,15 @@ class ShortcutController:
                     return full
         return None
 
+    def _send_key(self, action: str, keys: str) -> ActionResult:
+        """Send a keyboard shortcut and return ActionResult."""
+        try:
+            keyboard.send(keys)
+            return ActionResult(True, action, f"Sent: {keys}")
+        except Exception as e:
+            logger.error(f"ShortcutController._send_key('{keys}') failed: {e}")
+            return ActionResult(False, action, f"keyboard.send failed: {keys}", str(e))
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def open_chrome(self) -> ActionResult:
@@ -99,16 +112,23 @@ class ShortcutController:
         )
 
     def open_vscode(self) -> ActionResult:
-        exe = self._find_exe("code.cmd", [
+        """
+        Search for Code.exe first (direct EXE), then code.cmd (shim).
+        code.cmd must NOT be passed directly to shell=False Popen — it's a
+        batch file.  Only Code.exe is safe for shell=False.
+        """
+        # 1. Try Code.exe directly (most reliable)
+        exe = self._find_exe("Code.exe", [
             ("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"),
             ("ProgramFiles",  r"Microsoft VS Code\Code.exe"),
         ])
-        # Fallback: look for Code.exe directly
         if not exe:
-            exe = self._find_exe("Code.exe", [
-                ("LOCALAPPDATA", r"Programs\Microsoft VS Code\Code.exe"),
-                ("ProgramFiles",  r"Microsoft VS Code\Code.exe"),
-            ])
+            # 2. Try code.cmd shim — but resolve to Code.exe in the same folder
+            cmd_shim = self._find_exe("code.cmd", [])
+            if cmd_shim:
+                candidate = os.path.join(os.path.dirname(cmd_shim), "Code.exe")
+                if os.path.isfile(candidate):
+                    exe = candidate
         if exe:
             return self._launch_exe(exe)
         return ActionResult(
@@ -133,24 +153,31 @@ class ShortcutController:
             return ActionResult(False, "lock_pc", "Cooldown active.", None)
         try:
             import ctypes
-            ctypes.windll.user32.LockWorkStation()
+            result = ctypes.windll.user32.LockWorkStation()
             self._last_open_time = now
-            logger.info("Workstation locked.")
-            return ActionResult(True, "lock_pc", "PC locked.")
+            if result:
+                logger.info("Workstation locked.")
+                return ActionResult(True, "lock_pc", "PC locked.")
+            else:
+                # LockWorkStation returned 0 (failure)
+                import ctypes
+                err = ctypes.GetLastError()
+                logger.error(f"LockWorkStation() returned 0, error code: {err}")
+                return ActionResult(False, "lock_pc", "LockWorkStation API returned failure.", str(err))
         except Exception as e:
             logger.error(f"Lock PC failed: {e}")
             return ActionResult(False, "lock_pc", "Failed to lock PC.", str(e))
 
     # ── Window management (keyboard shortcuts) ────────────────────────────────
 
-    def snap_left(self) -> None:
-        keyboard.send("windows+left")
+    def snap_left(self) -> ActionResult:
+        return self._send_key("snap_left", "windows+left")
 
-    def snap_right(self) -> None:
-        keyboard.send("windows+right")
+    def snap_right(self) -> ActionResult:
+        return self._send_key("snap_right", "windows+right")
 
-    def maximize(self) -> None:
-        keyboard.send("windows+up")
+    def maximize(self) -> ActionResult:
+        return self._send_key("maximize", "windows+up")
 
-    def minimize(self) -> None:
-        keyboard.send("windows+down")
+    def minimize(self) -> ActionResult:
+        return self._send_key("minimize", "windows+down")

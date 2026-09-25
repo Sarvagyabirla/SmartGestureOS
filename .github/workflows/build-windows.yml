@@ -2,7 +2,7 @@ name: Build — Windows Installer
 
 on:
   push:
-    branches: ["main", "production/**"]
+    branches: ["main", "production/**", "release/**"]
   workflow_dispatch:
 
 concurrency:
@@ -23,6 +23,13 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Read version from src/version.py
+        id: version
+        run: |
+          $ver = python -c "from src.version import __version__; print(__version__)"
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version: $ver"
+
       - name: Install production + build dependencies
         run: |
           pip install -r requirements.txt
@@ -31,11 +38,11 @@ jobs:
       - name: Verify no dependency conflicts
         run: pip check
 
-      - name: Run tests (must pass before build)
-        run: python -m pytest tests/ -v --tb=short
-
       - name: Syntax check (compileall)
         run: python -m compileall -q main.py config.py src
+
+      - name: Run tests (must pass before build)
+        run: python -m pytest tests/ -v --tb=short -m "not hardware"
 
       - name: Build with PyInstaller
         run: |
@@ -53,23 +60,38 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
 
-      - name: Build installer (Inno Setup)
+      - name: Build installer (Inno Setup) with dynamic version
         run: |
-          iscc packaging\windows\SmartGestureOS.iss
+          $ver = "${{ steps.version.outputs.version }}"
+          iscc /DAppVersion=$ver packaging\windows\SmartGestureOS.iss
 
-      - name: Verify installer exists
+      - name: Verify installer exists and is non-empty
+        id: installer
         run: |
-          $installer = Get-Item "dist\SmartGestureOS_Setup*.exe" -ErrorAction SilentlyContinue
+          $installer = Get-Item "dist\release\SmartGestureOS-Setup-v*.exe" -ErrorAction SilentlyContinue
           if (-not $installer) {
-            Write-Error "Installer not found!"
+            Write-Error "Installer not found in dist\release\!"
+            exit 1
+          }
+          if ($installer.Length -eq 0) {
+            Write-Error "Installer is empty (0 bytes)!"
             exit 1
           }
           Write-Host "Installer: $($installer.Name) ($($installer.Length) bytes)"
+          echo "path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          echo "name=$($installer.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Compute SHA-256
+        run: |
+          $hash = (Get-FileHash "${{ steps.installer.outputs.path }}" -Algorithm SHA256).Hash
+          Write-Host "SHA-256: $hash"
+          echo "$hash  ${{ steps.installer.outputs.name }}" > dist\release\SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: SmartGestureOS-Windows-build-${{ github.sha }}
           path: |
-            dist/SmartGestureOS_Setup*.exe
+            dist/release/SmartGestureOS-Setup-v*.exe
+            dist/release/SHA256SUMS.txt
           retention-days: 30
