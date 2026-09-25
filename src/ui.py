@@ -103,6 +103,9 @@ class SmartGestureApp(ctk.CTk):
         self.coach_btn = ctk.CTkButton(self.btn_frame, text="Gesture Coach", command=self.open_coach, fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4")
         self.coach_btn.pack(fill="x", pady=4)
         
+        self.pause_btn = ctk.CTkButton(self.btn_frame, text="Pause (Ctrl+Alt+G)", command=self.toggle_pause, fg_color="#d64545", hover_color="#b33939")
+        self.pause_btn.pack(fill="x", pady=4)
+        
         self.sidebar.grid_rowconfigure(11, weight=1)
         
         # Status indicators
@@ -148,6 +151,13 @@ class SmartGestureApp(ctk.CTk):
             self.close_callback()
         self.destroy()
         
+    def toggle_pause(self):
+        if hasattr(self, 'close_callback') and self.close_callback:
+            # We can trigger it by simulating the hotkey or calling main app method
+            # For simplicity, we just send the hotkey
+            import keyboard
+            keyboard.send('ctrl+alt+g')
+
     def open_coach(self):
         from src.ui_coach import CoachUI
         if not hasattr(self, 'coach_window') or self.coach_window is None or not self.coach_window.winfo_exists():
@@ -176,7 +186,7 @@ class SmartGestureApp(ctk.CTk):
         self.history_textbox.insert("0.0", "\n".join(reversed(self.action_history)))
         self.history_textbox.configure(state="disabled")
         
-    def update_dashboard(self, mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False, avg_latency=0):
+    def update_dashboard(self, mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False, avg_latency=0, automation_enabled=True):
         # Dynamic mode colors
         mode_colors = {
             "GENERAL": "#3a7ebf", # Blue
@@ -223,7 +233,9 @@ class SmartGestureApp(ctk.CTk):
         else:
             self.camera_state_label.configure(text="● CAMERA DISCONNECTED", text_color="#d64545")
             
-        if is_sleeping:
+        if not automation_enabled:
+            self.automation_state_label.configure(text="● AUTOMATION PAUSED", text_color="#d64545")
+        elif is_sleeping:
             self.automation_state_label.configure(text="● AUTOMATION SLEEPING", text_color="#d64545")
         else:
             self.automation_state_label.configure(text="● AUTOMATION ON", text_color=self.accent_color)

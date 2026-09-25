@@ -32,7 +32,15 @@ class GestureClassifier:
 
         from src.settings_manager import settings_manager
         settings_manager.register_callback(self.on_settings_changed)
+        self.on_settings_changed()
         
+    def reset(self):
+        self.history.clear()
+        self.last_stable_gesture = "Unknown"
+        self.last_raw_gesture = "Unknown"
+        self.is_pinching = False
+        self.confidence_ema = 0.0
+
     def on_settings_changed(self) -> None:
         """Update calibration thresholds from settings."""
         from config import SETTINGS
@@ -54,7 +62,7 @@ class GestureClassifier:
         
         wrist = self.get_3d_point(lms_list[0])
         middle_mcp = self.get_3d_point(lms_list[9])
-        hand_size = max(0.01, np.linalg.norm(wrist - middle_mcp))
+        hand_size = max(1e-6, np.linalg.norm(wrist - middle_mcp))
         margin = hand_size * 0.15 # 15% of hand size margin to prevent noise jitter
         
         # Thumb: compare distance of tip to pinky mcp vs thumb mcp to pinky mcp
@@ -120,7 +128,7 @@ class GestureClassifier:
         index_mcp = self.get_3d_point(lms_list[5])
         middle_mcp = self.get_3d_point(lms_list[9])
         
-        hand_size = np.linalg.norm(wrist - middle_mcp)
+        hand_size = max(1e-6, np.linalg.norm(wrist - middle_mcp))
         d_pinch = np.linalg.norm(thumb_tip - index_tip)
         
         if not hasattr(self, 'is_pinching'):

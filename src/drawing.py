@@ -61,6 +61,30 @@ class DrawingCanvas:
 
     # ── Drawing ───────────────────────────────────────────────────────────────
 
+    def resize(self, new_width: int, new_height: int) -> "ActionResult":
+        from src.models import ActionResult
+        import time
+        import cv2
+        t = time.perf_counter()
+        
+        if new_width <= 0 or new_height <= 0:
+            return ActionResult(False, "resize_canvas", "Invalid dimensions", "Width/height <= 0", t)
+            
+        if new_width == self.width and new_height == self.height:
+            return ActionResult(True, "resize_canvas", "No resize needed", None, t)
+            
+        try:
+            self.canvas = cv2.resize(self.canvas, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            self.width = new_width
+            self.height = new_height
+            
+            self.undo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.undo_stack]
+            self.redo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.redo_stack]
+            
+            return ActionResult(True, "resize_canvas", f"Resized to {new_width}x{new_height}", None, t)
+        except Exception as e:
+            return ActionResult(False, "resize_canvas", "Resize failed", str(e), t)
+
     def draw(self, x: int, y: int, draw_mode: bool = True) -> tuple[int, int]:
         t = time.perf_counter()  # F-38 FIX
 
@@ -99,32 +123,48 @@ class DrawingCanvas:
 
     # ── Tools ─────────────────────────────────────────────────────────────────
 
-    def toggle_eraser(self) -> None:
+    def toggle_eraser(self) -> "ActionResult":
+        from src.models import ActionResult
+        import time
         self.is_eraser = not self.is_eraser
+        return ActionResult(True, "toggle_eraser", f"Eraser {'On' if self.is_eraser else 'Off'}", None, time.perf_counter())
 
-    def cycle_color(self) -> None:
+    def cycle_color(self) -> "ActionResult":
+        from src.models import ActionResult
+        import time
         self.is_eraser = False
         self.color_idx = (self.color_idx + 1) % len(self.colors)
         self.color = self.colors[self.color_idx]
+        return ActionResult(True, "cycle_color", "Color cycled", None, time.perf_counter())
 
-    def clear(self) -> None:
+    def clear(self) -> "ActionResult":
+        from src.models import ActionResult
+        import time
         self._save_state()
         self.canvas = np.zeros((self.height, self.width, 3), np.uint8)
+        return ActionResult(True, "clear_canvas", "Canvas cleared", None, time.perf_counter())
 
     # ── Undo / Redo ───────────────────────────────────────────────────────────
 
-    def undo(self) -> None:
+    def undo(self) -> "ActionResult":
+        from src.models import ActionResult
+        import time
         if not self.undo_stack:
-            return
-        # Always keep at least one state (the blank canvas)
+            return ActionResult(False, "undo", "Undo stack empty", None, time.perf_counter())
         if len(self.undo_stack) > 1 or np.count_nonzero(self.canvas) > 0:
             self.redo_stack.append(self.canvas.copy())
             self.canvas = self.undo_stack.pop()
+            return ActionResult(True, "undo", "Undo successful", None, time.perf_counter())
+        return ActionResult(False, "undo", "No state to undo", None, time.perf_counter())
 
-    def redo(self) -> None:
+    def redo(self) -> "ActionResult":
+        from src.models import ActionResult
+        import time
         if self.redo_stack:
             self.undo_stack.append(self.canvas.copy())
             self.canvas = self.redo_stack.pop()
+            return ActionResult(True, "redo", "Redo successful", None, time.perf_counter())
+        return ActionResult(False, "redo", "No state to redo", None, time.perf_counter())
 
     # ── Save ──────────────────────────────────────────────────────────────────
 

@@ -48,7 +48,31 @@ class MainApp:
         # Track camera connected state to detect transitions
         self._was_camera_connected = False
 
+        self.automation_enabled = True
+        try:
+            import keyboard
+            keyboard.add_hotkey('ctrl+alt+g', self.toggle_automation)
+        except Exception as e:
+            logger.error(f"Failed to bind hotkey: {e}")
+
         self.start_system()
+
+    def toggle_automation(self):
+        self.automation_enabled = not self.automation_enabled
+        if not self.automation_enabled:
+            if hasattr(self, 'mapper'):
+                self.mapper.mouse.release_all()
+                if hasattr(self.mapper.mouse, 'engine'):
+                    self.mapper.mouse.engine.on_hand_lost()
+                if hasattr(self.mapper.timer, 'reset'):
+                    self.mapper.timer.reset()
+                if hasattr(self.mapper.sleep_timer, 'reset'):
+                    self.mapper.sleep_timer.reset()
+            if hasattr(self, 'classifier') and hasattr(self.classifier, 'reset'):
+                self.classifier.reset()
+            logger.info("Automation Paused")
+        else:
+            logger.info("Automation Resumed")
 
     def start_system(self):
         if self.camera.start():
@@ -217,7 +241,7 @@ class MainApp:
                         sleeping = self.mapper.is_sleeping if hasattr(self, "mapper") else False
                         self.frame_queue.put_nowait((
                             err_frame, [], mode, "Unknown", "Unknown", 0,
-                            None, 0, self.cpu_usage, self.ram_usage, False, sleeping, 0
+                            None, 0, self.cpu_usage, self.ram_usage, False, sleeping, 0, self.automation_enabled
                         ))
                     except (queue.Empty, queue.Full):
                         pass
@@ -293,7 +317,12 @@ class MainApp:
                     # 3. Always apply mapper using current ML result
                     display_frame = frame.copy()
 
-                    if latest_hands_data:
+                    if not self.automation_enabled:
+                        import cv2
+                        cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        latest_action = "Paused"
+                        latest_progress = 0.0
+                    elif latest_hands_data:
                         # Draw landmark dots
                         for hand_data in latest_hands_data:
                             h1 = hand_data["landmarks"]
@@ -342,7 +371,7 @@ class MainApp:
                             latest_action, fps,
                             self.cpu_usage, self.ram_usage,
                             is_connected, self.mapper.is_sleeping,
-                            avg_latency,
+                            avg_latency, self.automation_enabled
                         ))
                     except (queue.Empty, queue.Full):
                         pass
@@ -365,13 +394,13 @@ class MainApp:
                 (
                     frame, hands_data, mode, stable_gesture, raw_gesture,
                     confidence, action, fps, cpu_usage, ram_usage,
-                    camera_on, is_sleeping, avg_latency,
+                    camera_on, is_sleeping, avg_latency, automation_enabled
                 ) = self.frame_queue.get_nowait()
                 self.ui.current_hands_data = hands_data
                 self.ui.update_dashboard(
                     mode, stable_gesture, raw_gesture, confidence,
                     action, fps, cpu_usage, ram_usage,
-                    camera_on, is_sleeping, avg_latency,
+                    camera_on, is_sleeping, avg_latency, automation_enabled
                 )
                 self.ui.update_frame(frame)
         except Exception:

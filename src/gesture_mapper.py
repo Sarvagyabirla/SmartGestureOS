@@ -22,6 +22,12 @@ class GestureHoldTimer:
         self.last_executed = 0
         self.executed_once = False
         
+    def reset(self):
+        self.target_gesture = None
+        self.start_time = 0
+        self.last_executed = 0
+        self.executed_once = False
+
     def get_progress(self):
         if not self.target_gesture or self.target_gesture == "None" or self.target_gesture == "Unknown" or self.executed_once:
             return 0.0

@@ -71,8 +71,10 @@ class TrainerUI(ctk.CTkToplevel):
         
     def start_recording(self):
         name = self.name_entry.get().strip()
-        if not name:
-            messagebox.showwarning("Error", "Please enter a gesture name.")
+        from .gesture_trainer import validate_gesture_name
+        is_valid, msg = validate_gesture_name(name)
+        if not is_valid:
+            messagebox.showwarning("Error", msg)
             return
             
         self.is_recording = True
@@ -90,11 +92,16 @@ class TrainerUI(ctk.CTkToplevel):
         
         if hands_data and len(hands_data) > 0:
             landmarks = hands_data[0]['landmarks']
-            success = gesture_trainer.add_sample(name, landmarks)
+            success, msg = gesture_trainer.add_sample(name, landmarks)
             if success:
                 self.samples_collected += 1
                 progress = self.samples_collected / self.target_samples
                 self.progress_bar.set(progress)
+            else:
+                self.status_label.configure(text=f"Error: {msg}", text_color="red")
+                self.is_recording = False
+                self.record_btn.configure(state="normal")
+                return
                 
         if self.samples_collected < self.target_samples:
             self.after(100, lambda: self.record_loop(name)) # Record sample every 100ms

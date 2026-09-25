@@ -31,14 +31,26 @@ class Camera:
         if self.running:
             return True
             
+        ret = True
         if not self._open_capture():
             logger.error(f"Failed to open camera index {self.index}")
-            return False
+            ret = False
             
+        # Always start thread, so it can retry connection
         self.running = True
         self.thread = threading.Thread(target=self._update, daemon=True)
         self.thread.start()
-        logger.info("Camera started successfully.")
+        logger.info("Camera started (or attempting to start).")
+        return ret
+            
+        if not self._open_capture():
+            logger.error(f"Failed to open camera index {self.index}")
+            
+        # Always start thread, so it can retry connection
+        self.running = True
+        self.thread = threading.Thread(target=self._update, daemon=True)
+        self.thread.start()
+        logger.info("Camera started (or attempting to start).")
         return True
         
     def _update(self):
