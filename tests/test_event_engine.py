@@ -117,6 +117,35 @@ def test_double_click_no_extra_single():
     assert len(calls) == 4, f"Expected 4 left mouse events for double click, got {len(calls)}"
 
 
+def test_second_pinch_after_double_click_window_starts_a_new_click():
+    """A late second pinch completes the first click and starts a fresh pinch."""
+    engine, mc, vm, user32 = _make_engine()
+    from src.event_engine import EventState
+
+    lms = _lms()
+    engine.process("Pinch", "Pinch", 500, 400, 1280, 720, lms)
+    engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
+    assert engine.state == EventState.PINCH_RELEASE_WAIT
+
+    # Simulate a second pinch beginning after the configured double-click window.
+    engine.pinch_release_time -= engine.double_click_window_ms + 0.01
+    engine.process("Pinch", "Pinch", 500, 400, 1280, 720, lms)
+
+    assert engine.state == EventState.PINCH_DOWN
+    left_events = [c[0][0] for c in user32.mouse_event.call_args_list
+                   if c[0][0] in (0x0002, 0x0004)]
+    assert left_events == [0x0002, 0x0004], "The expired first pinch should become one click"
+
+    # Releasing the new pinch must create its own pending single click.
+    engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
+    assert engine.state == EventState.PINCH_RELEASE_WAIT
+    engine.pinch_release_time -= engine.double_click_window_ms + 0.01
+    engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
+    left_events = [c[0][0] for c in user32.mouse_event.call_args_list
+                   if c[0][0] in (0x0002, 0x0004)]
+    assert left_events == [0x0002, 0x0004, 0x0002, 0x0004]
+
+
 # ---------------------------------------------------------------------------
 # TEST 3: Drag begins after hold
 # ---------------------------------------------------------------------------
