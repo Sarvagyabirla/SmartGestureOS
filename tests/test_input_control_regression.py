@@ -124,8 +124,10 @@ class TestInputControlRegression:
 
         fake_user32.mouse_event.reset_mock()
 
-        # Second pinch within double-click window
+        # Second short pinch begins within the window, then releases.
         engine.process("Pinch", "Pinch", 640, 360, 1280, 720, lms)
+        assert engine.state == EventState.PINCH_DOWN
+        engine.process("Pointing", "Pointing", 640, 360, 1280, 720, lms)
         assert engine.state == EventState.COOLDOWN
 
         # Double click produces 4 events: DOWN, UP, DOWN, UP

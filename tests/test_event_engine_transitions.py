@@ -62,20 +62,55 @@ def test_drag_drops_on_raw_release_before_stable_pose_catches_up(pipeline):
     assert engine.state == EventState.COOLDOWN
 
 
-def test_held_second_pinch_cannot_generate_an_extra_click_or_drag(pipeline):
+def test_second_short_pinch_clicks_twice_only_after_its_release(pipeline):
     engine, mouse, tick = pipeline
     tick(0, "Pinch")
     tick(0.1, "Pointing")
     tick(0.2, "Pinch")
-    for elapsed in (0.36, 0.4, 0.8, 1.0):
-        tick(elapsed, "Pinch")
+    mouse.double_click.assert_not_called()
+    tick(0.25, "Pointing")
     mouse.double_click.assert_called_once_with()
     mouse.click.assert_not_called()
     mouse.drag.assert_not_called()
-    tick(1.1, "Pointing")
-    tick(1.2, "Pinch")
-    tick(1.56, "Pinch")
+
+
+def test_second_short_pinch_can_finish_after_its_entry_window(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Pinch")
+    tick(0.1, "Pointing")
+    tick(0.3, "Pinch")  # Starts within 220 ms of the first release.
+    tick(0.55, "Pointing")  # Still a short second pinch; release is later.
+    mouse.double_click.assert_called_once_with()
+    mouse.click.assert_not_called()
+    assert engine.state == EventState.COOLDOWN
+
+
+def test_second_pinch_that_becomes_a_hold_drags_without_double_click(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Pinch")
+    tick(0.1, "Pointing")
+    tick(0.2, "Pinch")
+    mouse.double_click.assert_not_called()
+    tick(0.33, "Pinch")
+    mouse.click.assert_not_called()
+    tick(0.56, "Pinch")
+    mouse.click.assert_called_once_with(button="left")
     mouse.drag.assert_called_once_with(start=True)
+    assert engine.state == EventState.DRAGGING
+    tick(0.6, "Pointing")
+    mouse.drag.assert_any_call(start=False)
+    mouse.double_click.assert_not_called()
+
+
+def test_raw_pinch_with_stale_pointing_label_does_not_queue_ghost_click(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Pointing")
+    tick(0.01, "Pinch", stable="Pointing")
+    tick(0.05, "Pointing")
+    tick(0.3, "Pointing")
+    assert engine.state == EventState.HOVER
+    mouse.click.assert_not_called()
+    mouse.drag.assert_not_called()
 
 
 def test_pending_click_keeps_its_cursor_target_until_dispatched(pipeline):

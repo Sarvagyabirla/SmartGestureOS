@@ -49,6 +49,7 @@ class EventEngine:
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
         self._pinch_consumed = False
+        self._second_pinch_pending = False
 
         # F-06 FIX: track whether right-click gesture was released before re-arming
         self._right_click_armed = True  # True = ready to fire right-click
@@ -71,6 +72,7 @@ class EventEngine:
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
         self._pinch_consumed = False
+        self._second_pinch_pending = False
         self.scroll_start_y = None
         self.scroll_accumulator = 0.0
         self._right_click_armed = True
@@ -101,7 +103,11 @@ class EventEngine:
         # classifier. Its stable history can lag an actual release by frames.
         is_pinching = raw_gesture == "Pinch"
         is_scrolling = raw_gesture == "Two Fingers"
-        can_start_action = stable_gesture not in (None, "None", "Unknown")
+        # A transient raw pose must agree with the stable classifier before it
+        # can begin a click or scroll. Raw release still ends an active action
+        # immediately, even while the stable label catches up.
+        can_start_action = (stable_gesture == raw_gesture
+                            and stable_gesture not in (None, "None", "Unknown"))
         if not is_pinching:
             self._pinch_consumed = False
 
@@ -146,15 +152,33 @@ class EventEngine:
                 self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.PINCH_DOWN:
+            hold_duration = now - self.pinch_down_time
             if not is_pinching:
-                # No button was pressed while still in PINCH_DOWN. A release
-                # first observed after the hold deadline must not swallow the
-                # click; only a held sample can start an actual drag.
-                self.pinch_release_time = now
-                self._change_state(EventState.PINCH_RELEASE_WAIT)
+                if self._second_pinch_pending and hold_duration < self.drag_hold_ms:
+                    # The second pinch began in the window and stayed short.
+                    self.mouse.mouse.double_click()
+                    self._second_pinch_pending = False
+                    self._pinch_consumed = True
+                    self._change_state(EventState.COOLDOWN)
+                else:
+                    if self._second_pinch_pending:
+                        # The second pinch lasted too long for a double click,
+                        # but no held sample began a drag before this release.
+                        self.mouse.mouse.click(button="left")
+                        self._second_pinch_pending = False
+                    # No button was pressed while still in PINCH_DOWN. A release
+                    # first observed after the hold deadline must not swallow
+                    # the click; only a held sample can start an actual drag.
+                    self.pinch_release_time = now
+                    self._change_state(EventState.PINCH_RELEASE_WAIT)
             else:
-                hold_duration = now - self.pinch_down_time
                 if hold_duration >= self.drag_hold_ms:
+                    if self._second_pinch_pending:
+                        # The second pinch started in the double-click window,
+                        # then became a hold. Complete the first click before
+                        # beginning the drag.
+                        self.mouse.mouse.click(button="left")
+                        self._second_pinch_pending = False
                     self.mouse.mouse.drag(start=True)
                     self._change_state(EventState.DRAGGING)
                     self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
@@ -162,10 +186,11 @@ class EventEngine:
         elif self.state == EventState.PINCH_RELEASE_WAIT:
             if is_pinching and can_start_action:
                 if now - self.pinch_release_time <= self.double_click_window_ms:
-                    # Second pinch within double-click window
-                    self.mouse.mouse.double_click()
-                    self._pinch_consumed = True
-                    self._change_state(EventState.COOLDOWN)
+                    # Wait for the second release to distinguish a short pinch
+                    # from a hold that should become a drag.
+                    self._second_pinch_pending = True
+                    self.pinch_down_time = now
+                    self._change_state(EventState.PINCH_DOWN)
                 else:
                     # The first click expired. Commit it and treat this as a
                     # fresh pinch so it can become its own click or drag.
