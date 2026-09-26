@@ -2,6 +2,7 @@ import customtkinter as ctk
 from .settings_manager import settings_manager
 from config import save_settings
 import tkinter.messagebox as messagebox
+from copy import deepcopy
 
 class CalibrationWizard(ctk.CTkToplevel):
     def __init__(self, master):
@@ -18,7 +19,7 @@ class CalibrationWizard(ctk.CTkToplevel):
         
         self.configure(fg_color=self.bg_color)
         
-        self.label = ctk.CTkLabel(self, text="Please show a 'Peace' sign to the camera\nand hold it steady.", font=ctk.CTkFont(family="Segoe UI", size=14))
+        self.label = ctk.CTkLabel(self, text="Show the Victory gesture (a wide V)\nand hold it steady. Automation is paused.", font=ctk.CTkFont(family="Segoe UI", size=14))
         self.label.pack(pady=30)
         
         self.cal_btn = ctk.CTkButton(self, text="Calibrate Now", command=self.do_calibrate)
@@ -38,11 +39,18 @@ class CalibrationWizard(ctk.CTkToplevel):
         wrist = np.array([lms[0].x, lms[0].y, lms[0].z])
         middle_mcp = np.array([lms[9].x, lms[9].y, lms[9].z])
         hand_size = np.linalg.norm(wrist - middle_mcp)
+        if not np.isfinite(hand_size) or not 0.0 < hand_size < 1.0:
+            messagebox.showerror("Calibration", "The hand measurement is invalid. Reposition your hand and try again.")
+            return
         
+        previous = settings_manager.settings["gestures"]["base_hand_size"]
         settings_manager.settings["gestures"]["base_hand_size"] = float(hand_size)
-        save_settings()
+        if not save_settings():
+            settings_manager.settings["gestures"]["base_hand_size"] = previous
+            messagebox.showerror("Save failed", settings_manager.last_error or "Calibration could not be saved.")
+            return
         
-        messagebox.showinfo("Success", f"Calibrated! Base hand size: {hand_size:.1f}")
+        messagebox.showinfo("Success", f"Calibrated! Base hand size: {hand_size:.3f}")
         self.destroy()
 
 class SettingsUI(ctk.CTkToplevel):
@@ -100,7 +108,7 @@ class SettingsUI(ctk.CTkToplevel):
         
         # Tab View for organized settings
         self.tabview = ctk.CTkTabview(self, fg_color=self.card_color, segmented_button_selected_color=self.bg_color, segmented_button_selected_hover_color="#333333")
-        self.tabview.grid(row=2, column=0, padx=20, pady=10, sticky="nsew")
+        self.tabview.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
         
         self.tab_sensitivity = self.tabview.add("Sensitivity")
         self.tab_mappings = self.tabview.add("Mappings")
@@ -154,7 +162,10 @@ class SettingsUI(ctk.CTkToplevel):
         self.call_me_dropdown.grid(row=1, column=1, padx=10, pady=15, sticky="ew")
 
     def on_profile_change(self, selected_profile):
-        settings_manager.load_profile(selected_profile)
+        if not settings_manager.load_profile(selected_profile):
+            self.profile_var.set(settings_manager.current_profile)
+            messagebox.showerror("Profile not loaded", settings_manager.last_error or "The profile could not be loaded.")
+            return
         # Refresh UI
         self.sensitivity_slider.set(settings_manager.settings["gestures"].get("sensitivity", 0.7))
         self.smoothing_slider.set(settings_manager.settings["gestures"].get("smoothing", 2))
@@ -168,12 +179,16 @@ class SettingsUI(ctk.CTkToplevel):
     def add_profile(self):
         new_name = self.new_profile_entry.get().strip()
         if new_name and new_name not in settings_manager.get_all_profiles():
-            settings_manager.load_profile(new_name)
+            if not settings_manager.load_profile(new_name):
+                messagebox.showerror("Profile not created", settings_manager.last_error or "The profile could not be created.")
+                return
             self.profile_dropdown.configure(values=settings_manager.get_all_profiles())
             self.profile_var.set(new_name)
             self.new_profile_entry.delete(0, "end")
+            self.on_profile_change(new_name)
             
     def apply_settings(self):
+        previous = deepcopy(settings_manager.settings)
         settings_manager.settings["gestures"]["sensitivity"] = float(self.sensitivity_slider.get())
         settings_manager.settings["gestures"]["smoothing"] = int(self.smoothing_slider.get())
         settings_manager.settings["gestures"]["hold_time_ms"] = int(self.hold_slider.get())
@@ -185,11 +200,16 @@ class SettingsUI(ctk.CTkToplevel):
         settings_manager.settings["mappings"]["GENERAL"]["Rock On"] = self.rock_on_var.get()
         settings_manager.settings["mappings"]["GENERAL"]["Call Me"] = self.call_me_var.get()
         
-        save_settings()
+        if not save_settings():
+            settings_manager.settings.clear()
+            settings_manager.settings.update(previous)
+            messagebox.showerror("Save failed", settings_manager.last_error or "Settings could not be saved.")
+            return False
+        return True
             
     def save_and_close(self):
-        self.apply_settings()
-        self.on_closing()
+        if self.apply_settings():
+            self.on_closing()
         
     def open_calibration(self):
         CalibrationWizard(self)
