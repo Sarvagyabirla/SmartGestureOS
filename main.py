@@ -566,11 +566,40 @@ class MainApp:
             self.stop_system()
 
 
+def run_self_check() -> bool:
+    """Exercise bundled imports, model loading and one native inference without a camera."""
+    import numpy as np
+
+    detector = None
+    try:
+        detector = GestureDetector()
+        if not detector.detector_available:
+            logger.error(f"Self-check: detector unavailable: {detector.detector_error}")
+            return False
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        result = detector.process_frame(frame, 1)
+        if result is None or detector.frames_processed != 1:
+            logger.error("Self-check: MediaPipe VIDEO inference failed.")
+            return False
+        logger.info("Self-check passed: model loaded and VIDEO inference completed.")
+        return True
+    except Exception:
+        logger.exception("Self-check failed:")
+        return False
+    finally:
+        if detector is not None:
+            detector.close()
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="SmartGestureOS desktop application")
     parser.add_argument("--start-paused", action="store_true",
                         help="Show live tracking with desktop automation initially paused")
+    parser.add_argument("--self-check", action="store_true",
+                        help="Check bundled model and native inference without opening the camera or UI")
     args = parser.parse_args()
+    if args.self_check:
+        raise SystemExit(0 if run_self_check() else 1)
     app = MainApp(start_paused=args.start_paused)
     app.run()

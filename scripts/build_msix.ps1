@@ -13,7 +13,12 @@ if (-not (Test-Path (Join-Path $appDir "SmartGestureOS.exe"))) {
 }
 if (-not (Test-Path $manifestSource)) { throw "Canonical MSIX manifest is missing: $manifestSource" }
 
-$versionLine = & $pythonExe -c "from src.version import __version__; print(__version__)"
+Push-Location -LiteralPath $repoRoot
+try {
+    $versionLine = & $pythonExe -c "from src.version import __version__; print(__version__)"
+} finally {
+    Pop-Location
+}
 if ($LASTEXITCODE -ne 0 -or $versionLine -notmatch '^\d+\.\d+\.\d+$') {
     throw "Could not read a three-part version from src\version.py."
 }

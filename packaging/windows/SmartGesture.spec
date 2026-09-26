@@ -67,7 +67,6 @@ a = Analysis(
     excludes=[
         # Development-only packages
         'pytest',
-        'matplotlib',
         'IPython',
         'notebook',
     ],
