@@ -2,7 +2,7 @@ name: CI — Tests
 
 on:
   push:
-    branches: ["main", "production/**", "hardening/**", "fix/**", "feature/**"]
+    branches: ["main", "production/**", "hardening/**", "fix/**", "feature/**", "debug/**"]
   pull_request:
     branches: ["main"]
 
@@ -49,4 +49,4 @@ jobs:
           retention-days: 14
 
       - name: Syntax check (compileall)
-        run: python -m compileall -q main.py config.py src
+        run: python -m compileall -q main.py config.py src tests scripts
