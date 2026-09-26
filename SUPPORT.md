@@ -16,7 +16,7 @@ channel for your issue type:
 
 1. Read [GESTURES.md](GESTURES.md) — make sure the gesture is supported.
 2. Check [existing issues](https://github.com/Sarvagyabirla/SmartGestureOS/issues?q=is%3Aissue).
-3. Collect your log file: `%LOCALAPPDATA%\SmartGestureOS\logs\latest.log`
+3. Collect your log file: `%LOCALAPPDATA%\SmartGesture\logs\smart_gesture_os.log`
 
 ## Information to Include in a Bug Report
 
@@ -30,7 +30,7 @@ Steps to reproduce:
   2.
 Expected: ...
 Actual: ...
-Log snippet: (paste from latest.log)
+Log snippet: (paste from smart_gesture_os.log)
 ```
 
 ## FAQ
@@ -51,4 +51,4 @@ A: Yes — use the **Trainer** tab in the UI. See [GESTURES.md](GESTURES.md) for
 A: No. See [PRIVACY.md](PRIVACY.md).
 
 **Q: What Python version is required?**  
-A: Python 3.11 exactly. MediaPipe and several other dependencies require 3.11+.
+A: Python 3.11 is the supported project environment. Check `requirements.txt` if you use a different Python version.

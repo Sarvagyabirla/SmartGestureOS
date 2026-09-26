@@ -9,7 +9,7 @@
     "gestures": {
         "sensitivity": 0.7,
         "cooldown_ms": 500,
-        "smoothing": 5,
+        "smoothing": 2,
         "hold_time_ms": 300,
         "base_hand_size": 1.0
     },
@@ -47,6 +47,7 @@
         }
     },
     "calibration": {
+        "confidence_threshold": 50.0,
         "hand_size_baseline": 1.0,
         "pointer_extension_ratio": 0.4,
         "pinch_enter_threshold": 0.45,

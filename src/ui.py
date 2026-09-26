@@ -3,13 +3,14 @@ from PIL import Image, ImageTk
 import cv2
 from collections import deque
 import warnings
+from src.logger import logger
 
 # Suppress the CustomTkinter warning about using PhotoImage instead of CTkImage
 # We intentionally use PhotoImage to prevent memory leaks in the fast render loop.
 warnings.filterwarnings("ignore", message=".*Given image is not CTkImage.*")
 
 class SmartGestureApp(ctk.CTk):
-    def __init__(self, close_callback):
+    def __init__(self, close_callback=None, toggle_pause_callback=None, set_automation_callback=None):
         super().__init__()
         
         self.title("SmartGestureOS")
@@ -36,6 +37,9 @@ class SmartGestureApp(ctk.CTk):
             pass
         
         self.close_callback = close_callback
+        self.toggle_pause_callback = toggle_pause_callback
+        self.set_automation_callback = set_automation_callback
+        self.automation_enabled = True
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.grid_rowconfigure(0, weight=1)
@@ -86,7 +90,7 @@ class SmartGestureApp(ctk.CTk):
         self.stats_frame.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
         self.fps_label = ctk.CTkLabel(self.stats_frame, text="Rate: 0", font=normal_font, text_color=self.muted_text)
         self.fps_label.pack(side="left", expand=True)
-        self.latency_label = ctk.CTkLabel(self.stats_frame, text="LAT: 0ms", font=normal_font, text_color=self.muted_text)
+        self.latency_label = ctk.CTkLabel(self.stats_frame, text="Input: 0ms", font=normal_font, text_color=self.muted_text)
         self.latency_label.pack(side="left", expand=True)
         self.cpu_label = ctk.CTkLabel(self.stats_frame, text="CPU: 0%", font=normal_font, text_color=self.muted_text)
         self.cpu_label.pack(side="left", expand=True)
@@ -152,11 +156,13 @@ class SmartGestureApp(ctk.CTk):
         self.destroy()
         
     def toggle_pause(self):
-        if hasattr(self, 'close_callback') and self.close_callback:
-            # We can trigger it by simulating the hotkey or calling main app method
-            # For simplicity, we just send the hotkey
-            import keyboard
-            keyboard.send('ctrl+alt+g')
+        logger.info("UI Pause/Resume button clicked.")
+        if self.set_automation_callback is not None:
+            self.set_automation_callback(not self.automation_enabled)
+        elif self.toggle_pause_callback is not None:
+            self.toggle_pause_callback()
+        else:
+            logger.warning("No toggle_pause_callback or set_automation_callback configured on UI.")
 
     def open_coach(self):
         from src.ui_coach import CoachUI
@@ -220,7 +226,7 @@ class SmartGestureApp(ctk.CTk):
         current_time = time.time()
         if current_time - self.last_stat_update > 0.5:
             self.fps_label.configure(text=f"Rate: {fps}")
-            self.latency_label.configure(text=f"LAT: {avg_latency}ms")
+            self.latency_label.configure(text=f"Input: {avg_latency}ms")
             self.cpu_label.configure(text=f"CPU: {cpu_usage:.1f}%")
             self.ram_label.configure(text=f"RAM: {ram_usage:.1f} MB")
             self.last_stat_update = current_time
@@ -233,12 +239,16 @@ class SmartGestureApp(ctk.CTk):
         else:
             self.camera_state_label.configure(text="● CAMERA DISCONNECTED", text_color="#d64545")
             
+        self.automation_enabled = automation_enabled
         if not automation_enabled:
             self.automation_state_label.configure(text="● AUTOMATION PAUSED", text_color="#d64545")
+            self.pause_btn.configure(text="Resume (Ctrl+Alt+G)", fg_color="#2fa572", hover_color="#26855c")
         elif is_sleeping:
             self.automation_state_label.configure(text="● AUTOMATION SLEEPING", text_color="#d64545")
+            self.pause_btn.configure(text="Pause (Ctrl+Alt+G)", fg_color="#d64545", hover_color="#b33939")
         else:
             self.automation_state_label.configure(text="● AUTOMATION ON", text_color=self.accent_color)
+            self.pause_btn.configure(text="Pause (Ctrl+Alt+G)", fg_color="#d64545", hover_color="#b33939")
 
     def update_frame(self, frame):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

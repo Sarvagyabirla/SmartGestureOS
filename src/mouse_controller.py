@@ -6,10 +6,11 @@ from .logger import logger
 class MouseController:
     def __init__(self):
         from config import SETTINGS
-        # Calculate derived OneEuro filter params based on a 0-1 sensitivity slider
-        sensitivity = SETTINGS.get("gestures", {}).get("sensitivity", 0.7)
-        beta = max(0.01, sensitivity * 0.5) # higher sensitivity = more responsive
-        min_cutoff = max(0.1, (1.0 - sensitivity) * 1.5) # lower sensitivity = more smoothing
+        gestures = SETTINGS.get("gestures", {})
+        sensitivity = float(gestures.get("sensitivity", 0.7))
+        smoothing = max(1, min(20, int(gestures.get("smoothing", 2))))
+        beta = max(0.01, sensitivity * 0.5)
+        min_cutoff = self._smoothing_cutoff(smoothing)
 
         self.mouse = VirtualMouse(min_cutoff=min_cutoff, beta=beta, deadzone=1.0)
         from .event_engine import EventEngine
@@ -17,15 +18,29 @@ class MouseController:
 
         from src.settings_manager import settings_manager
         settings_manager.register_callback(self.on_settings_changed)
+        self.on_settings_changed()
+
+    @staticmethod
+    def _smoothing_cutoff(smoothing: int) -> float:
+        """Map the UI slider (1 = responsive, 20 = smooth) to One Euro cutoff."""
+        smoothing = max(1, min(20, int(smoothing)))
+        return 4.0 - ((smoothing - 1) / 19.0) * 2.8
 
     def on_settings_changed(self):
         from config import SETTINGS
         sensitivity = SETTINGS.get("gestures", {}).get("sensitivity", 0.7)
+        smoothing = SETTINGS.get("gestures", {}).get("smoothing", 2)
         beta = max(0.01, sensitivity * 0.5)
-        min_cutoff = max(0.1, (1.0 - sensitivity) * 1.5)
+        min_cutoff = self._smoothing_cutoff(smoothing)
         self.mouse.smoother.min_cutoff = min_cutoff
         self.mouse.smoother.beta = beta
         self.mouse.deadzone = max(0.1, (1.0 - sensitivity) * 2.0)
+
+        # Update already-created One Euro filters as well as future filters.
+        for axis_filter in (self.mouse.smoother.filter_x, self.mouse.smoother.filter_y):
+            if axis_filter is not None:
+                axis_filter.min_cutoff = min_cutoff
+                axis_filter.beta = beta
 
     def process_landmarks(self, lms_list, stable_gesture, raw_gesture, frame_w, frame_h):
         if not lms_list or len(lms_list) < 21:
@@ -57,4 +72,5 @@ class MouseController:
     def release_all(self):
         """Release all actions and reset engine state."""
         self.mouse.release_all()
-        self.engine.on_hand_lost()
+        if hasattr(self, "engine"):
+            self.engine.reset()

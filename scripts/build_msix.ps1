@@ -1,67 +1,85 @@
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== SmartGestureOS MSIX Build Script ===" -ForegroundColor Cyan
-Write-Host "Validating MakeAppx tool availability..."
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$distDir = Join-Path $repoRoot "dist"
+$appDir = Join-Path $distDir "SmartGestureOS"
+$manifestSource = Join-Path $repoRoot "packaging\windows\msix\AppxManifest.xml"
+$assetsDir = Join-Path $repoRoot "packaging\windows\msix\Assets"
+$pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
 
-# Ensure Windows 10 SDK is installed
-$makeappx = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\makeappx.exe"
-if (-not (Test-Path $makeappx)) {
-    # Try finding it dynamically or warn
-    $makeappx = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-    if (-not $makeappx) {
-        Write-Host "MakeAppx.exe not found! Please install Windows 10/11 SDK." -ForegroundColor Red
-        exit 1
+if (-not (Test-Path (Join-Path $appDir "SmartGestureOS.exe"))) {
+    throw "PyInstaller ONEDIR output is missing. Build it first with scripts\build_windows.ps1."
+}
+if (-not (Test-Path $manifestSource)) { throw "Canonical MSIX manifest is missing: $manifestSource" }
+
+$versionLine = & $pythonExe -c "from src.version import __version__; print(__version__)"
+if ($LASTEXITCODE -ne 0 -or $versionLine -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Could not read a three-part version from src\version.py."
+}
+$version = "$versionLine.0"
+
+[xml]$manifest = Get-Content -LiteralPath $manifestSource -Raw
+$identity = $manifest.Package.Identity
+if ($identity.Name -match '^YOUR_' -or $identity.Publisher -match '^CN=YOUR_' -or
+    $manifest.Package.Properties.PublisherDisplayName -match '^Your Publisher') {
+    throw "Replace the Identity Name, Publisher, and PublisherDisplayName with exact Partner Center values before building an MSIX."
+}
+
+# Verify real PNG headers and dimensions before staging. Never manufacture placeholder images.
+$requiredAssets = @{
+    "StoreLogo.png" = @(50, 50)
+    "Square44x44Logo.png" = @(44, 44)
+    "Square150x150Logo.png" = @(150, 150)
+    "Wide310x150Logo.png" = @(310, 150)
+    "Square310x310Logo.png" = @(310, 310)
+    "SplashScreen.png" = @(620, 300)
+}
+foreach ($name in $requiredAssets.Keys) {
+    $path = Join-Path $assetsDir $name
+    if (-not (Test-Path -LiteralPath $path)) { throw "Required real MSIX visual asset is missing: $path" }
+    $bytes = [System.IO.File]::ReadAllBytes($path)
+    if ($bytes.Length -lt 24) { throw "MSIX visual asset is too small to be a valid PNG: $path" }
+    $pngSignature = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
+    $validPng = $true
+    for ($i = 0; $i -lt $pngSignature.Length; $i++) {
+        if ($bytes[$i] -ne $pngSignature[$i]) { $validPng = $false; break }
+    }
+    if (-not $validPng -or [System.Text.Encoding]::ASCII.GetString($bytes, 12, 4) -ne "IHDR") {
+        throw "MSIX visual asset is not a valid PNG: $path"
+    }
+    $width = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($bytes, 16))
+    $height = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($bytes, 20))
+    if ($width -ne $requiredAssets[$name][0] -or $height -ne $requiredAssets[$name][1]) {
+        throw "Wrong dimensions for $name; expected $($requiredAssets[$name][0])x$($requiredAssets[$name][1]), got ${width}x${height}."
     }
 }
 
-$version = "1.0.0.0"
-if (Test-Path "version.txt") {
-    $ver = (Get-Content "version.txt").Trim()
-    # Ensure it's in 4-part format for MSIX (e.g. 1.0.0.0)
-    $version_parts = $ver.Split('.')
-    while ($version_parts.Length -lt 4) { $version_parts += '0' }
-    $version = $version_parts[0..3] -join "."
+$sdkRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+$makeAppx = Get-ChildItem -LiteralPath $sdkRoot -Directory -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending |
+    ForEach-Object { Join-Path $_.FullName "x64\makeappx.exe" } |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    Select-Object -First 1
+if (-not $makeAppx) { throw "MakeAppx.exe not found. Install the Windows 10/11 SDK. Checked: $sdkRoot" }
+
+$layoutDir = Join-Path $distDir "msix_layout"
+$releaseDir = Join-Path $distDir "release"
+$output = Join-Path $releaseDir "SmartGestureOS_${version}_x64.msix"
+if (Test-Path -LiteralPath $layoutDir) { Remove-Item -LiteralPath $layoutDir -Recurse -Force }
+New-Item -ItemType Directory -Path $layoutDir -Force | Out-Null
+Copy-Item -Path (Join-Path $appDir "*") -Destination $layoutDir -Recurse -Force
+Copy-Item -LiteralPath $manifestSource -Destination (Join-Path $layoutDir "AppxManifest.xml")
+New-Item -ItemType Directory -Path (Join-Path $layoutDir "Assets") -Force | Out-Null
+foreach ($name in $requiredAssets.Keys) {
+    Copy-Item -LiteralPath (Join-Path $assetsDir $name) -Destination (Join-Path $layoutDir "Assets\$name")
 }
 
-Write-Host "Using version: $version"
-
-Write-Host "Staging MSIX layout..."
-$msix_dir = "dist\msix_layout"
-if (Test-Path $msix_dir) { Remove-Item -Recurse -Force $msix_dir }
-New-Item -ItemType Directory -Force -Path "$msix_dir" | Out-Null
-New-Item -ItemType Directory -Force -Path "$msix_dir\Assets" | Out-Null
-
-# Copy PyInstaller output
-Copy-Item -Recurse -Force "dist\SmartGestureOS\*" "$msix_dir\"
-
-# Copy AppxManifest and Assets
-Copy-Item -Force "packaging\windows\AppxManifest.xml" "$msix_dir\AppxManifest.xml"
-
-# Update version in manifest
-$manifest = Get-Content "$msix_dir\AppxManifest.xml"
-$manifest = $manifest -replace 'Version="[^"]+"', "Version=""$version"""
-Set-Content -Path "$msix_dir\AppxManifest.xml" -Value $manifest
-
-# Create placeholder assets if they don't exist yet (for testing purposes)
-# In production, these should be replaced with real assets
-foreach ($img in @("StoreLogo.png", "Square150x150Logo.png", "Square44x44Logo.png", "Wide310x150Logo.png", "SplashScreen.png")) {
-    # create a dummy file if not exists
-    $out_path = "$msix_dir\Assets\$img"
-    # just create empty file for now so makeappx doesn't fail
-    New-Item -ItemType File -Force -Path $out_path | Out-Null
-}
-
-$output_msix = "release\SmartGestureOS_${version}_x64.msix"
-if (-not (Test-Path "release")) { New-Item -ItemType Directory -Path "release" | Out-Null }
-if (Test-Path $output_msix) { Remove-Item -Force $output_msix }
-
-Write-Host "Packing MSIX..."
-& $makeappx pack /d "$msix_dir" /p "$output_msix"
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "MSIX Build COMPLETE: $output_msix" -ForegroundColor Green
-    Write-Host "Remember to sign the package using SignTool before sideloading or publishing." -ForegroundColor Yellow
-} else {
-    Write-Host "MSIX Build FAILED with exit code $LASTEXITCODE" -ForegroundColor Red
-    exit $LASTEXITCODE
-}
+[xml]$stagedManifest = Get-Content -LiteralPath (Join-Path $layoutDir "AppxManifest.xml") -Raw
+$stagedManifest.Package.Identity.Version = $version
+$stagedManifest.Save((Join-Path $layoutDir "AppxManifest.xml"))
+New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+& $makeAppx pack /d $layoutDir /p $output /o
+if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed with exit code $LASTEXITCODE" }
+Write-Host "MSIX created: $output" -ForegroundColor Green
+Write-Host "Sign it with a trusted certificate before sideloading. Microsoft signs Store submissions."

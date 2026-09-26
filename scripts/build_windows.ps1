@@ -1,10 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== SmartGestureOS Build Script ===" -ForegroundColor Cyan
-Write-Host "Cleaning previous builds..."
-
-if (Test-Path "build")  { Remove-Item -Recurse -Force "build" }
-if (Test-Path "dist")   { Remove-Item -Recurse -Force "dist" }
+Write-Host "Preserving existing release artifacts..."
 
 $pythonExe = if (Test-Path ".\.venv\Scripts\python.exe") { ".\.venv\Scripts\python.exe" } else { "python" }
 
@@ -16,7 +13,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Running PyInstaller (ONEDIR)..."
-& $pythonExe -m PyInstaller --noconfirm --clean .\packaging\windows\SmartGesture.spec
+& $pythonExe -m PyInstaller --noconfirm --clean `
+    --workpath .\build\SmartGestureOS `
+    --distpath .\dist `
+    .\packaging\windows\SmartGesture.spec
 
 if ($LASTEXITCODE -eq 0) {
     $exe = "dist\SmartGestureOS\SmartGestureOS.exe"

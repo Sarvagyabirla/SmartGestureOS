@@ -1,74 +1,63 @@
-# SmartGestureOS - Gestures and Actions (Strict 1-to-1 Mapping)
+# Gesture Reference
 
-This document outlines the strictly unique gesture mappings. Every single task in a given mode is tied to its own distinct gesture, preventing overlap or accidental triggers.
+SmartGestureOS recognizes 14 static hand poses. Pinch click, double-click, and
+drag are temporal actions built around the Pinch pose. Discrete actions execute
+after the configured hold time (300 ms by default); adjust it in Settings.
 
-## Core Gestures (General Mode)
+## Gestures used in every mode
 
-### Mouse & Navigation (Immediate & Continuous)
-| Gesture | Action | Description |
-| :--- | :--- | :--- |
-| ☝️ **Pointing (Index Finger)** | Move Mouse | Moves the cursor around the screen smoothly. |
-| 👌 **Pinch** | Left Click | Pinch index and thumb together to click. |
-| 👌👌 **Double Pinch** | Double Click | Pinch twice quickly. |
-| 🤏 **Pinch and Hold** | Drag | Hold the pinch gesture to drag items or windows. |
-| ✌️ **Two Fingers (Held together)** | Scroll | Hold index and middle fingers close together and move up/down to scroll continuously. |
-| 🖕 **Middle Finger** | Adjust Brightness | Hold only your middle finger up and move your hand up/down to seamlessly increase/decrease brightness. |
-| 🖐️ **Three Fingers** | Right Click | Spreading three fingers triggers a right click. |
+| Gesture | GENERAL | MEDIA | DRAW |
+|---|---|---|---|
+| Call Me (thumb and pinky extended) | Cycle to next mode | Cycle to next mode | Cycle to next mode |
+| Pointing (index finger extended) | Move cursor | — | Draw on the in-app canvas |
+| Pinch (thumb and index touch) | Click; pinch twice for double-click; hold to drag | Play or pause | Hover the canvas pointer |
 
-### Shortcuts & Actions (Hold to execute)
-| Gesture | Action | Description |
-| :--- | :--- | :--- |
-| ✌️ **Victory (V-Shape)** | Open VS Code | Spread index and middle fingers apart into a 'V'. |
-| 🤟 **Rock On (Thumb + Index + Pinky)** | Open Chrome | Opens Google Chrome. |
-| 🖖 **Four Fingers** | Screenshot | Takes a screenshot of the current screen. |
-| 👍 **Thumb Up** | Volume Up | Increases system volume. |
-| 👎 **Thumb Down** | Volume Down | Decreases system volume. |
-| ✋ **Open Palm** | Task View | Opens Windows Task View. |
-| ✊ **Closed Fist** | Show Desktop | Minimizes all windows to show the desktop. |
-| 🤞 **Crossed Fingers** | Lock PC | Cross your index and middle fingers to lock your computer. |
-| 🤙 **Call Me** | Cycle Modes | Cycles between GENERAL, MEDIA, and DRAW modes. |
-
-
-## Media Mode
+## GENERAL mode
 
 | Gesture | Action |
-| :--- | :--- |
-| 👌 **Pinch** | Play / Pause |
-| ✌️ **Victory (V-Shape)** | Next Track |
-| 🖐️ **Three Fingers** | Previous Track |
-| ✊ **Closed Fist** | Mute System |
-| 🤙 **Call Me** | Cycle Modes | Cycles between GENERAL, MEDIA, and DRAW modes. |
+|---|---|
+| Two Fingers (index and middle together) | Scroll up/down with hand movement |
+| Three Fingers | Right-click |
+| Middle Finger | Adjust screen brightness by moving the hand up/down |
+| Victory (index and middle spread into a V) | Open VS Code |
+| Rock On (thumb, index, and pinky extended) | Open Chrome |
+| Four Fingers | Take a screenshot |
+| Thumb Up / Thumb Down | Increase / decrease system volume |
+| Open Palm | Open Windows Task View |
+| Closed Fist | Show the desktop |
+| Crossed Fingers (index and middle crossed) | Lock the PC |
 
----
+## MEDIA mode
 
-## Draw Mode
+| Gesture | Action |
+|---|---|
+| Pinch | Play or pause media |
+| Victory | Next track |
+| Three Fingers | Previous track |
+| Closed Fist | Mute media volume |
 
-| Gesture | Action | Description |
-| :--- | :--- | :--- |
-| ☝️ **Pointing (Index Finger)** | Draw | Draw on the in-app canvas overlay. |
-| ✋ **Open Palm** | Hover | Move the brush cursor without drawing. |
-| ✊ **Closed Fist** | Clear Canvas | Erases everything on the canvas. |
-| ✌️ **Victory (V-Shape)** | Undo | Undo the last drawing stroke. |
-| 🖐️ **Three Fingers** | Redo | Redo the last undone stroke. |
-| 🖖 **Four Fingers** | Save Drawing | Saves the current canvas to a file. |
-| 👍 **Thumb Up** | Cycle Color | Change the drawing color. |
-| 👎 **Thumb Down** | Toggle Eraser | Switch between the drawing brush and the eraser. |
-| 🤙 **Call Me** | Cycle Modes | Cycles between GENERAL, MEDIA, and DRAW modes. |
+## DRAW mode
 
+| Gesture | Action |
+|---|---|
+| Pointing | Draw on the canvas in the app window |
+| Open Palm | Move the brush cursor without drawing |
+| Closed Fist | Clear the canvas |
+| Victory | Undo the last stroke |
+| Three Fingers | Redo the last undone stroke |
+| Four Fingers | Save the drawing |
+| Thumb Up | Cycle drawing color |
+| Thumb Down | Toggle the eraser |
 
-## Gesture Disambiguation
+Drawing is limited to the in-app canvas; it does not draw over arbitrary Windows
+applications. User-trained poses can be created in the Trainer window and
+mapped through the active profile.
 
-| Pair | How to distinguish |
-|------|-------------------|
-| **Two Fingers vs Victory** | Two Fingers = index + middle held *close together and parallel*. Victory = index + middle spread clearly apart into a V shape. |
-| **Crossed Fingers vs Two Fingers** | Crossed Fingers = index and middle genuinely overlapping/crossing. Two Fingers = side by side. |
-| **Call Me vs Rock On** | Call Me = Thumb + Pinky only (index/middle/ring folded). Rock On = Thumb + Index + Pinky (middle + ring folded). |
+## Recognition tips
 
-## Custom Gestures
-You can also train your own custom gestures using the Trainer Window in the application's UI. Once trained, custom gestures will be recognized automatically and can be mapped to any action in your profile (e.g. `profiles/default.json`).
-
-## Tips for Best Performance
-- Action gestures (like Opening Chrome, Changing Volume, etc.) require you to hold the pose steadily to execute.
-- Mouse movements like pointing, clicking, dragging, scrolling, and adjusting brightness execute **immediately and continuously**.
-- Make sure to spread your fingers for **Victory**, and keep them tight for **Two Fingers (Scroll)**!
-- Ensure good lighting for best recognition accuracy.
+- Keep the hand in view with even lighting and the palm facing the camera.
+- Spread index and middle fingers for Victory; keep them close and parallel for
+  Two Fingers scrolling.
+- Call Me uses thumb and pinky only. Rock On uses thumb, index, and pinky.
+- If the pointer feels slow, set **Pointer Smoothing** closer to 1 in Settings.
+  Higher values trade response speed for steadier movement.

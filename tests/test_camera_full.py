@@ -109,6 +109,22 @@ def test_camera_is_connected_after_read():
     assert connected is True
 
 
+def test_read_with_timestamp_returns_monotonic_capture_timestamp():
+    import numpy as np
+    from src.camera import Camera
+
+    cam = Camera(index=0)
+    captured_at = time.perf_counter() - 0.01
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    cam.frame_queue.put((frame, 7, captured_at))
+
+    read_frame, frame_id, read_captured_at = cam.read_with_timestamp()
+
+    assert read_frame is frame
+    assert frame_id == 7
+    assert read_captured_at == captured_at
+
+
 def test_camera_reconnect_reapplies_settings():
     """
     Verify that when isOpened() returns False the _update thread calls

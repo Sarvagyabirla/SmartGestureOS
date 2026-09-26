@@ -162,7 +162,7 @@ class GestureMapper:
         self.brightness_gesture_active = False
         self.last_brightness_y = None
         if hasattr(self.mouse, "engine"):
-            self.mouse.engine.on_hand_lost()
+            self.mouse.engine.reset()
 
     # ── Actions ────────────────────────────────────────────────────────────────
 
@@ -232,7 +232,7 @@ class GestureMapper:
         if new_w == self.frame_w and new_h == self.frame_h:
             return
         logger.info(
-            f"Mapper dims {self.frame_w}x{self.frame_h} → {new_w}x{new_h}: resizing canvas."
+            f"Mapper dims {self.frame_w}x{self.frame_h} -> {new_w}x{new_h}: resizing canvas."
         )
         self.frame_w = new_w
         self.frame_h = new_h

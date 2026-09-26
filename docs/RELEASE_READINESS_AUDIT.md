@@ -1,10 +1,16 @@
 # SmartGestureOS — Release Readiness Audit
 
+> Historical audit snapshot dated 2026-09-25. Its branch, finding statuses, and
+> 60-test baseline describe that audit only; they are not current release status.
+> See [`RELEASE_READINESS.md`](../RELEASE_READINESS.md) and
+> [`HARDWARE_VALIDATION_REPORT.md`](HARDWARE_VALIDATION_REPORT.md) for current
+> validation and remaining work.
+
 **Baseline commit:** `ed775a8` (latest on `main`, Sep 25 2026)  
 **Audit branch:** `production/v1-release-hardening`  
 **Auditor:** Principal Software Architect / AI  
 **Date:** 2026-09-25  
-**Test baseline:** 60/60 PASS (pytest 9.1.1, Python 3.11.9)
+**Test baseline at audit time:** 60 passed (pytest 9.1.1, Python 3.11.9)
 
 ---
 

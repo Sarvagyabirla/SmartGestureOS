@@ -125,7 +125,7 @@ with:
 - Python version (`python --version`)
 - Camera make/model
 - Steps to reproduce
-- Log output from `%LOCALAPPDATA%\SmartGestureOS\logs\`
+- Log output from `%LOCALAPPDATA%\SmartGesture\logs\smart_gesture_os.log`
 
 ## Security Issues
 

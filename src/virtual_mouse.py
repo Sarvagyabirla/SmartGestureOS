@@ -15,12 +15,18 @@ class VirtualMouse:
         self.smoother = PointSmoother(min_cutoff=min_cutoff, beta=beta)
         self.deadzone = deadzone
         try:
-            self.screen = screeninfo.get_monitors()[0]
-            self.screen_w = self.screen.width
-            self.screen_h = self.screen.height
+            monitors = screeninfo.get_monitors()
+            primary = next((m for m in monitors if getattr(m, 'is_primary', False)), monitors[0])
+            self.screen = primary
+            self.screen_x = getattr(primary, 'x', 0)
+            self.screen_y = getattr(primary, 'y', 0)
+            self.screen_w = primary.width
+            self.screen_h = primary.height
         except Exception as e:
             from .logger import logger
             logger.warning(f"Failed to detect screen size: {e}. Defaulting to 1920x1080.")
+            self.screen_x = 0
+            self.screen_y = 0
             self.screen_w = 1920
             self.screen_h = 1080
             
@@ -32,6 +38,8 @@ class VirtualMouse:
         self.user32 = ctypes.windll.user32
         
     def map_coordinates(self, x, y, cam_w, cam_h):
+        cam_w = max(1, cam_w)
+        cam_h = max(1, cam_h)
         # Screen Coordinate Normalization (Active center area)
         active_w = cam_w * 0.6
         active_h = cam_h * 0.6
@@ -51,8 +59,10 @@ class VirtualMouse:
         t = time.perf_counter()
         smooth_x, smooth_y = self.smoother.update(t, screen_x, screen_y)
         
-        final_x = max(0, min(int(smooth_x), self.screen_w - 1))
-        final_y = max(0, min(int(smooth_y), self.screen_h - 1))
+        offset_x = getattr(self, 'screen_x', 0)
+        offset_y = getattr(self, 'screen_y', 0)
+        final_x = max(offset_x, min(int(smooth_x) + offset_x, offset_x + self.screen_w - 1))
+        final_y = max(offset_y, min(int(smooth_y) + offset_y, offset_y + self.screen_h - 1))
         
         # Dead Zone implementation
         if self.last_pos:

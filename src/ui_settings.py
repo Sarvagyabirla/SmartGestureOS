@@ -120,9 +120,9 @@ class SettingsUI(ctk.CTkToplevel):
         self.sensitivity_slider.set(settings_manager.settings["gestures"].get("sensitivity", 0.7))
         self.sensitivity_slider.grid(row=0, column=1, padx=10, pady=15, sticky="ew")
         
-        ctk.CTkLabel(self.tab_sensitivity, text="Pointer Smoothing:").grid(row=1, column=0, padx=10, pady=15, sticky="w")
+        ctk.CTkLabel(self.tab_sensitivity, text="Pointer Smoothing (1 = fast):").grid(row=1, column=0, padx=10, pady=15, sticky="w")
         self.smoothing_slider = ctk.CTkSlider(self.tab_sensitivity, from_=1, to=20, number_of_steps=19)
-        self.smoothing_slider.set(settings_manager.settings["gestures"].get("smoothing", 10))
+        self.smoothing_slider.set(settings_manager.settings["gestures"].get("smoothing", 2))
         self.smoothing_slider.grid(row=1, column=1, padx=10, pady=15, sticky="ew")
         
         ctk.CTkLabel(self.tab_sensitivity, text="Gesture Hold Time (ms):").grid(row=2, column=0, padx=10, pady=15, sticky="w")
@@ -157,7 +157,7 @@ class SettingsUI(ctk.CTkToplevel):
         settings_manager.load_profile(selected_profile)
         # Refresh UI
         self.sensitivity_slider.set(settings_manager.settings["gestures"].get("sensitivity", 0.7))
-        self.smoothing_slider.set(settings_manager.settings["gestures"].get("smoothing", 10))
+        self.smoothing_slider.set(settings_manager.settings["gestures"].get("smoothing", 2))
         self.hold_slider.set(settings_manager.settings["gestures"].get("hold_time_ms", 300))
         self.cooldown_slider.set(settings_manager.settings["gestures"].get("cooldown_ms", 400))
         

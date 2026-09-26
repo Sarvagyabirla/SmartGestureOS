@@ -1,5 +1,11 @@
 # SmartGestureOS Baseline Audit
 
+> Historical snapshot from the pre-hardening baseline. Findings below describe
+> that earlier tree and are not a current status report. See
+> [`RELEASE_READINESS.md`](../RELEASE_READINESS.md) and
+> [`HARDWARE_VALIDATION_REPORT.md`](HARDWARE_VALIDATION_REPORT.md) for the
+> current state and validation results.
+
 ## 1. Current Git State
 - **Branch**: `hardening/production-v1` (derived from `main`)
 - **Untracked / Modified Files**: Numerous files were modified and untracked (including `.gitignore`, `GESTURES.md`, `main.py`, `src/*`, `tests/*`, etc.). These were preserved in the `backup/pre-production-YYYYMMDD-HHMM` branch and snapshotted.

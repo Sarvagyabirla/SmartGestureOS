@@ -1,7 +1,7 @@
 # Privacy Policy — SmartGestureOS
 
 **Effective Date:** 2025-01-01  
-**Last Updated:** 2025-09-25  
+**Last Updated:** 2026-09-26
 **Developer:** Sarvagya Birla  
 **Contact:** [GitHub Issues](https://github.com/Sarvagyabirla/SmartGestureOS/issues)
 
@@ -9,26 +9,29 @@
 
 ## Overview
 
-SmartGestureOS is a **local-only** Windows desktop application. It runs entirely
-on your device. No data ever leaves your computer.
+SmartGestureOS processes webcam frames locally for gesture recognition. The
+application does not include an account, analytics, or telemetry feature. Review
+the third-party library notices for the behavior and licenses of bundled
+dependencies.
 
 ---
 
 ## Data We Collect
 
-**SmartGestureOS collects no data from you.**
-
-More specifically:
+The app has no analytics or account system and does not send usage data to the
+developer. Camera frames and landmarks are used in memory for gesture control.
+The app can save screenshots, drawings, settings, custom gestures, and diagnostic
+logs locally as described below.
 
 | Category | Status |
 |----------|--------|
-| Camera images / video | **Never recorded or stored.** Processed in memory at runtime only. |
-| Hand landmark coordinates | **Never stored or transmitted.** Processed in memory during each frame. |
-| Gesture history | **Never logged or uploaded.** |
+| Camera images / video | Frames are processed in memory and are not saved by the capture pipeline. |
+| Hand landmark coordinates | Used in memory for gesture recognition and control. |
+| Gesture history | No history upload or analytics feature is implemented. |
 | User identity / account | **No account required.** No login, no email, no name. |
-| Usage analytics / telemetry | **None.** Zero telemetry or analytics code. |
+| Usage analytics / telemetry | No application analytics or telemetry feature is implemented. |
 | Crash reports | **Not automatically sent.** Log files are stored locally only (see below). |
-| Network connections | **None.** The app does not connect to the internet in any way. |
+| Network connections | The app has no account or cloud processing feature. Network behavior of third-party dependencies is governed by their own code and policies. |
 
 ---
 
@@ -38,11 +41,11 @@ SmartGestureOS stores the following data **locally on your device only**:
 
 | What | Where | Why |
 |------|-------|-----|
-| Application settings (JSON) | `%LOCALAPPDATA%\SmartGestureOS\settings\` | Remember your preferences |
-| Custom gesture models (JSON) | `%LOCALAPPDATA%\SmartGestureOS\models\` | Store gestures you trained |
-| Screenshots (PNG) | `%LOCALAPPDATA%\SmartGestureOS\screenshots\` | Saved when you use the screenshot gesture |
-| Drawings (PNG) | `%LOCALAPPDATA%\SmartGestureOS\drawings\` | Saved when you use save-drawing in Draw mode |
-| Log files (TXT) | `%LOCALAPPDATA%\SmartGestureOS\logs\` | Local debugging only; not transmitted |
+| Application settings (JSON) | `%LOCALAPPDATA%\SmartGesture\settings.json` | Remember your preferences |
+| Custom gesture models (JSON) | `%LOCALAPPDATA%\SmartGesture\custom_gestures\` | Store gestures you trained |
+| Screenshots (PNG) | `%LOCALAPPDATA%\SmartGesture\screenshots\` | Saved when you use the screenshot action |
+| Drawings (PNG) | `%LOCALAPPDATA%\SmartGesture\drawings\` | Saved when you use save-drawing in Draw mode |
+| Log files | `%LOCALAPPDATA%\SmartGesture\logs\smart_gesture_os.log` | Local debugging |
 
 All of this data is stored in the standard Windows per-user app data folder.
 You can delete it at any time by removing that folder.
@@ -53,16 +56,16 @@ You can delete it at any time by removing that folder.
 
 SmartGestureOS accesses your **camera** to detect hand gestures in real time.
 
-- Frames are processed in memory by the MediaPipe hand-tracking library.
-- Frames are **never** written to disk, stored in a database, or transmitted.
+- The application camera pipeline processes frames in memory and does not write
+  them to disk or send them to the developer. See third-party library notices
+  for information about bundled dependency behavior.
 - No microphone access is required or requested.
 
 ---
 
 ## Third-Party Libraries
 
-SmartGestureOS bundles several open-source libraries. These libraries run locally
-on your device and do not communicate with their authors' servers. See
+SmartGestureOS bundles several open-source libraries. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for a full list and their licenses.
 
 ---

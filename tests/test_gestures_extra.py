@@ -79,6 +79,42 @@ def test_gestures():
     
     # The default create_hand makes fingers parallel (no divergence)
     check([0, 1, 1, 0, 0], "Two Fingers")
+
+
+def test_remaining_builtin_finger_patterns():
+    """Cover static built-ins not exercised by the core classifier fixtures."""
+    check([0, 0, 1, 0, 0], "Middle Finger")
+    check([0, 1, 1, 1, 0], "Three Fingers")
+    check([0, 1, 1, 1, 1], "Four Fingers")
+    check([1, 1, 0, 0, 1], "Rock On")
+
+
+def test_thumb_down():
+    hand = create_hand([1, 0, 0, 0, 0])[0]
+    # Keep the thumb extended while pointing below the palm.
+    hand["landmarks"][4] = Landmark(
+        id=4, pixel_x=130, pixel_y=150, x=1.3, y=1.5, z=0.0
+    )
+
+    classifier = GestureClassifier(confidence_threshold=50)
+    for _ in range(6):
+        result = classifier.classify([hand])
+
+    assert result.gesture == "Thumb Down"
+
+
+def test_pinch_is_classified_from_thumb_index_distance():
+    hand = create_hand([0, 0, 0, 0, 0])[0]
+    # Bring thumb tip to index tip; keep index tip away from the palm center.
+    hand["landmarks"][4] = Landmark(
+        id=4, pixel_x=30, pixel_y=90, x=0.3, y=0.9, z=0.0
+    )
+
+    classifier = GestureClassifier(confidence_threshold=50)
+    for _ in range(6):
+        result = classifier.classify([hand])
+
+    assert result.gesture == "Pinch"
     
 def test_victory():
     # Create a hand with [0, 1, 1, 0, 0] but diverge the tips

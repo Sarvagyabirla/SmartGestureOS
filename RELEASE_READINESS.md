@@ -1,35 +1,33 @@
-# SmartGestureOS Release Readiness Report
+# SmartGestureOS Release Readiness
 
-## Overview
-SmartGestureOS has undergone an extensive production hardening and release completion process. The application has transitioned from a beta state to a professionally distributable Windows desktop application.
+## Current status
 
-## 1. Safety and Stability
-- **Global Emergency Kill-Switch**: Implemented `Ctrl+Alt+G` to instantly pause all gesture processing and release active hooks.
-- **Degenerate Value Protection**: Addressed division-by-zero vulnerabilities in `gesture_classifier.py` hand-size calculation.
-- **Fail-Safes**: Enhanced `EventEngine` to safely release dragged items and zero out state when the hand is lost (`on_hand_lost`).
-- **Resolution Synchronization**: Ensured `DrawingCanvas` dynamically resizes internal masks/overlays if the webcam resolution changes, preventing `cv2.bitwise_and` crashes.
-- **Error Handling**: Hardened `GestureTrainer` to correctly propagate success/failure states.
+The source tree has automated coverage for the camera pipeline, gesture classifier,
+action routing, mouse control, and drawing. The runtime uses MediaPipe VIDEO mode
+and a one-frame camera queue so stale frames do not build up. The camera and
+landmark pipeline has been measured locally; physical gesture accuracy and the
+installer still need human validation on the target Windows computer.
 
-## 2. Standardized Action Results
-All controllers have been refactored to implement a standardized `ActionResult` contract, ensuring consistent logging, UI feedback, and error reporting:
-- `KeyboardController`
-- `MediaController`
-- `VolumeController`
-- `BrightnessController`
-- `ShortcutController`
-- `DesktopController`
-- `PresentationController`
+## Packaging status
 
-## 3. Deployment and Packaging
-- **Single-Source Versioning**: Version is now controlled centrally via `version.txt`.
-- **Inno Setup (Classic)**: Fully configured `SmartGestureOS.iss` utilizing `#define AppVersion` dynamically for reliable, repeatable installations.
-- **MSIX Packaging (Store-Ready)**: Created a robust standard AppxManifest identity (`SarvagyaBirla.SmartGestureOS`) and the packaging script `scripts/build_msix.ps1` utilizing `makeappx`.
+- The application version is defined in `src/version.py` (`0.9.0`).
+- The Windows installer is built from the PyInstaller ONEDIR output using Inno
+  Setup; the configured output directory is `dist/release`.
+- MSIX packaging uses `packaging/windows/msix/AppxManifest.xml` and
+  `scripts/build_msix.ps1`.
+- The MSIX build is intentionally blocked until real visual assets and exact
+  Partner Center identity values are provided. No Store identity is assumed.
+- Store signing, submission, and certification have not been performed.
 
-## 4. Documentation and CI/CD
-- **GitHub Pages**: Configured `.github/workflows/pages.yml` to automatically build and host project documentation.
-- **Code Portability**: Hardcoded executable paths have been replaced by robust environmental lookups (e.g., `os.environ.get('WINDIR')` and `shutil.which`).
+## Validation still required
 
-## 5. Next Steps / Validation
-- Manual validation on clean Windows 10/11 machines without Python installed.
-- MSIX package signing and testing on hardware via sideloading.
-- Publish `v1.0.0` release on GitHub with `SmartGestureOS-Setup-v1.0.0.exe` and `.msix` artifacts attached.
+- Run the app and check every gesture in GENERAL, MEDIA, and DRAW modes with a
+  physical webcam and verify the cursor and UI feedback.
+- Verify camera unplug/reconnect and recovery from lighting or tracking loss.
+- Build and install the Windows installer on a clean Windows 10/11 x64 machine.
+- After supplying Partner Center identity and artwork, build, sign, and validate
+  the MSIX package.
+
+Automated test results and benchmark observations are recorded in
+`docs/HARDWARE_VALIDATION_REPORT.md`. Do not treat manual checks as passed until
+they are run on hardware.
