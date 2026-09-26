@@ -1,5 +1,5 @@
 import pytest
-import numpy as np
+from unittest.mock import MagicMock
 from src.mouse_controller import MouseController
 
 def create_mock_hand(scale=1.0, dy_offset=0.0):
@@ -34,13 +34,15 @@ def create_mock_hand(scale=1.0, dy_offset=0.0):
         Landmark(id=20, pixel_x=500, pixel_y=500, x=0.5, y=0.5, z=0.0),
     ]
 
-def test_distance_scaling():
-    mc = MouseController()
-    from src.event_engine import EventState
+def test_distance_scaling(monkeypatch):
+    from src.event_engine import EventEngine, EventState
+    mc = MouseController.__new__(MouseController)
+    mc.mouse = MagicMock()
+    mc.engine = EventEngine(mc)
     from config import SETTINGS
     if "gestures" not in SETTINGS:
-        SETTINGS["gestures"] = {}
-    SETTINGS["gestures"]["base_hand_size"] = 0.1
+        monkeypatch.setitem(SETTINGS, "gestures", {})
+    monkeypatch.setitem(SETTINGS["gestures"], "base_hand_size", 0.1)
     
     # 1. Normal hand
     h_normal_start = create_mock_hand(scale=1.0, dy_offset=0.0)

@@ -1,4 +1,4 @@
-import time
+import math
 from .virtual_mouse import VirtualMouse
 from .utils import get_distance
 from .logger import logger
@@ -44,6 +44,7 @@ class MouseController:
 
     def process_landmarks(self, lms_list, stable_gesture, raw_gesture, frame_w, frame_h):
         if not lms_list or len(lms_list) < 21:
+            self.release_all()
             return
 
         index_x, index_y = lms_list[8].pixel_x, lms_list[8].pixel_y
@@ -53,9 +54,21 @@ class MouseController:
         import numpy as np
         wrist = np.array([lms_list[0].x, lms_list[0].y, lms_list[0].z])
         middle_mcp = np.array([lms_list[9].x, lms_list[9].y, lms_list[9].z])
-        current_hand_size = max(0.01, np.linalg.norm(wrist - middle_mcp))
+        current_hand_size = float(np.linalg.norm(wrist - middle_mcp))
+        if not math.isfinite(current_hand_size):
+            self.release_all()
+            return
+        current_hand_size = max(0.01, current_hand_size)
         base_hand_size = SETTINGS.get("gestures", {}).get("base_hand_size", current_hand_size)
-        scale_factor = base_hand_size / current_hand_size
+        try:
+            base_hand_size = float(base_hand_size)
+        except (TypeError, ValueError):
+            base_hand_size = current_hand_size
+        # Legacy profiles use 1.0 as the uncalibrated placeholder. A measured
+        # wrist-to-knuckle distance uses normalized coordinates and is < 1.
+        if not math.isfinite(base_hand_size) or not 0.0 < base_hand_size < 1.0:
+            base_hand_size = current_hand_size
+        scale_factor = min(4.0, max(0.25, base_hand_size / current_hand_size))
 
         # Delegate to robust state machine event engine
         self.engine.process(

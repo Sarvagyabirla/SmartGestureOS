@@ -51,8 +51,15 @@ def simulated_app():
     app._shutdown_lock = threading.Lock()
     app._hotkey_handle = None
 
-    # Concrete subsystems with mocked OS mouse_event
-    with patch("ctypes.windll.user32.mouse_event"):
+    # Store a fake user32 on VirtualMouse for the entire instance lifetime.
+    # A method-only construction patch would expire before pause/reset runs.
+    with (
+        patch("src.virtual_mouse.ctypes.windll"),
+        patch("src.gesture_mapper.VolumeController"),
+        patch("src.gesture_mapper.BrightnessController"),
+        patch("src.gesture_mapper.FeedbackController"),
+        patch("src.settings_manager.settings_manager.register_callback"),
+    ):
         app.mapper = GestureMapper(640, 480)
         app.classifier = GestureClassifier()
 
