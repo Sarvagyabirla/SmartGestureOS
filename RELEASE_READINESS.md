@@ -2,6 +2,12 @@
 
 ## Current status
 
+Updated 27 September 2026: **346 automated tests pass**; source runtime fixes
+are recorded in [the current execution report](docs/RELEASE_EXECUTION_2026-09-27.md).
+Core mouse and full-feature physical acceptance remain pending. A native
+MediaPipe uploader attempt was observed; dependency network behavior remains
+an unresolved privacy limitation documented in [PRIVACY.md](PRIVACY.md).
+
 The source tree has automated coverage for the camera pipeline, gesture classifier,
 action routing, mouse control, and drawing. The runtime uses MediaPipe VIDEO mode
 and a one-frame camera queue so stale frames do not build up. The camera and

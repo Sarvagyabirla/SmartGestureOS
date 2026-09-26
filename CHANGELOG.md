@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Documentation
+- 2026-09-27: Corrected profile storage paths, team attribution, support routes,
+  Trainer controls, VIDEO detector architecture, and pinned dependency notices.
+- 2026-09-27: Disclosed observed MediaPipe 0.10.35 native Clearcut uploader
+  activity in a physical diagnostic. The observed upload failed; payload and
+  successful transmission status are unknown. Dependency behavior remains
+  unresolved and prevents a verified zero-telemetry/no-network claim. See
+  [PRIVACY.md](PRIVACY.md).
+
 ### Security
 - F-07: Replaced `shell=True` subprocess launches with `shell=False` + explicit exe paths in `ShortcutController`. Chrome and VS Code paths now located via `shutil.which` + known env-var paths. `lock_pc` uses `ctypes.windll.user32.LockWorkStation()` directly.
 - F-09: Added regex allowlist validation for profile names (`SettingsManager`). Rejects path separators, reserved Windows filenames, empty names, and names > 64 characters. Prevents path traversal attacks when loading/saving profiles.
@@ -30,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - F-01: Added `psutil>=5.9.0` to `requirements.txt` (was missing; caused import error on clean install).
-- F-02: Removed duplicate `opencv-contrib-python` from `requirements.txt`. Only `opencv-python` is kept (no contrib features are used).
+- F-02: Use `opencv-contrib-python==5.0.0.93` as the single OpenCV wheel in `requirements.txt`; do not install `opencv-python` alongside it.
 - F-03: Replaced `time.time()` with `time.perf_counter()` in `ShortcutController` rate-limiting.
 - F-04: Camera disconnect in `main.py` now calls `mapper.mouse.release_all()` to release all desktop automation (drag, click, scroll) when the camera transitions from connected to disconnected.
 - F-06: `EventEngine` right-click now uses a release gate (`_right_click_armed` flag). Right-click fires once per Three Fingers press, then requires gesture release before re-arming. Prevents repeated context-menu opens while Three Fingers is held.

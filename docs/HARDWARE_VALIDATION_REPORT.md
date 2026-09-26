@@ -1,10 +1,10 @@
 # Hardware and Automated Validation
 
-**Updated:** 2026-09-26
+**Updated:** 2026-09-27
 
 ## Automated checks
 
-- Python 3.11.9: `python -m pytest tests/ -v --tb=short`: **223 passed in 6.60 seconds** after the Step 2 mouse fixes and diagnostic checks.
+- Python 3.11.9: `python -m pytest tests/ -v --tb=short`: **346 passed in 7.08 seconds** after runtime, controller, drawing, profile and UI safety corrections.
 - `python -m compileall -q main.py config.py src tests scripts`: passed.
 - `python -m pip check`: passed, no broken requirements.
 - RGB skeleton drawing is covered with deterministic red and green color-phase
@@ -80,6 +80,21 @@ no Windows input receipts. Therefore **Step 2 remains PARTIAL**, and no physical
 mouse-control pass is claimed. The application, camera and hotkey shut down.
 
 ### Remaining release checks
+
+On 27 September, a second guided run lasted 00:43:05–00:44:26 IST. It showed
+21 landmarks, resumed, armed after neutral, then paused and shut down cleanly.
+The local report recorded 78 motion receipts, one blocked input call, no
+button/wheel receipts, and all six human observations `not_recorded`. Therefore
+the core-input hardware gate remains pending. No webcam images were saved.
+
+A separate read-only worker probe acquired the real Windows audio endpoint,
+read 40.1% volume (−96 to 0 dB range), and closed cleanly. The running app also
+acquired the endpoint successfully after the pycaw API/COM lifecycle fix.
+This validates endpoint access, not physical volume-up/down gestures.
+
+The live native MediaPipe log also contained a failed Clearcut uploader attempt.
+Successful transfer and payload contents were not established; see the
+[current report](RELEASE_EXECUTION_2026-09-27.md) and privacy documentation.
 
 - Present each gesture deliberately and verify the expected action in all three
   modes with a person operating the app.

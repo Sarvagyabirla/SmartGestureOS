@@ -17,6 +17,12 @@ Computer Vision Based Touchless Human-Computer Interaction
 
 ## Features
 
+**Release status (27 September 2026):** 346 automated tests pass. Physical
+mouse/mode acceptance and a validated standalone installer are still pending;
+see [release readiness](RELEASE_READINESS.md). The
+[privacy policy](PRIVACY.md) records observed MediaPipe dependency uploader
+activity and the limits of current network-behavior validation.
+
 - **Three control modes** — GENERAL (mouse + OS), MEDIA, and DRAW
 - **Real-time hand tracking** via MediaPipe Hand Landmarker (21 3D landmarks)
 - **Animated RGB hand highlight** so a detected hand is easy to see in the camera view

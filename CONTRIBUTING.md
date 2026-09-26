@@ -1,7 +1,8 @@
 # Contributing to SmartGestureOS
 
-Thank you for your interest in contributing! SmartGestureOS is a local-only
-Windows gesture control application built with Python, MediaPipe, and CustomTkinter.
+SmartGestureOS is a Windows gesture control application built with Python,
+MediaPipe, and CustomTkinter. Hand inference runs on the device; unresolved
+dependency uploader activity is documented in [PRIVACY.md](PRIVACY.md).
 
 ## Quick Start
 
@@ -47,7 +48,8 @@ python -m pytest tests/ -v
    ```powershell
    python -m pytest tests/ -v
    ```
-   All 73+ tests must pass.
+   All tests must pass. Record the current count and any skips from the run;
+   automated results do not establish physical gesture or installer readiness.
 
 4. **Open a Pull Request** against `main`. PR description must include:
    - What the change does
@@ -72,7 +74,7 @@ python -m pytest tests/ -v
 main.py                  # MainApp orchestrator (camera → detector → classifier → mapper)
 src/
   camera.py              # OpenCV capture + reconnect
-  gesture_detector.py    # Async MediaPipe pipeline
+  gesture_detector.py    # Synchronous MediaPipe VIDEO inference on the processing worker
   gesture_classifier.py  # Geometry → gesture name (stateless per-frame; history deque for temporal)
   event_engine.py        # Deterministic mouse state machine (CRITICAL: safety contract)
   gesture_mapper.py      # Action dispatcher + mode management
