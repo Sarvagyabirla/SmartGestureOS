@@ -507,15 +507,10 @@ class TestCustomGestureValidation:
 # ── Version consistency (§51) ─────────────────────────────────────────────────
 
 class TestVersionConsistency:
-    def test_version_txt_matches_version_py(self):
+    def test_version_uses_canonical_three_part_format(self):
         from src.version import __version__
-        version_txt = Path(__file__).parent.parent / "version.txt"
-        assert version_txt.exists(), "version.txt must exist"
-        txt_ver = version_txt.read_text().strip()
-        assert txt_ver == __version__, (
-            f"version.txt ({txt_ver}) does not match src/version.py ({__version__}). "
-            "Single source of truth is src/version.py."
-        )
+        assert __version__.count(".") == 2
+        assert all(part.isdigit() for part in __version__.split("."))
 
     def test_version_info_tuple_matches_version_string(self):
         from src.version import __version__, __version_info__

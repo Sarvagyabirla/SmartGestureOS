@@ -101,7 +101,8 @@ class Camera:
                 except queue.Empty:
                     pass
 
-            self.frame_queue.put((frame, self.frame_id))
+            captured_at = time.perf_counter()
+            self.frame_queue.put((frame, self.frame_id, captured_at))
             self.frame_id += 1
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -130,10 +131,21 @@ class Camera:
 
     def read(self) -> tuple:
         """Non-blocking read. Returns (frame, frame_id) or (None, -1)."""
+        frame, frame_id, _ = self.read_with_timestamp()
+        return frame, frame_id
+
+    def read_with_timestamp(self) -> tuple:
+        """Return the newest frame, id, and monotonic capture time."""
         try:
-            return self.frame_queue.get_nowait()
+            item = self.frame_queue.get_nowait()
         except queue.Empty:
-            return None, -1
+            return None, -1, None
+
+        # Accept legacy two-item entries from tests or downstream integrations.
+        if len(item) == 2:
+            frame, frame_id = item
+            return frame, frame_id, time.perf_counter()
+        return item
 
     def stop(self) -> None:
         """Stop capture thread and release resources. Idempotent."""

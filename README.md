@@ -19,7 +19,8 @@ Computer Vision Based Touchless Human-Computer Interaction
 
 - **Three control modes** — GENERAL (mouse + OS), MEDIA, and DRAW
 - **Real-time hand tracking** via MediaPipe Hand Landmarker (21 3D landmarks)
-- **16 built-in gestures** — Pointing, Pinch, Victory, Rock On, Open Palm, Closed Fist, Thumb Up/Down, Two Fingers, Three Fingers, Four Fingers, Middle Finger, Call Me, Crossed Fingers, and more
+- **Animated RGB hand highlight** so a detected hand is easy to see in the camera view
+- **14 built-in static gestures** — Pointing, Pinch, Victory, Rock On, Open Palm, Closed Fist, Thumb Up/Down, Two Fingers, Three Fingers, Four Fingers, Middle Finger, Call Me, and Crossed Fingers. Pinch hold/double-click are temporal actions.
 - **Temporal event engine** — single/double click, drag, and scroll are temporal events, not static poses
 - **Custom gesture training** — record and match your own gestures (nearest-sample matching)
 - **Automatic camera recovery** — reconnects if webcam is unplugged
@@ -35,7 +36,7 @@ Computer Vision Based Touchless Human-Computer Interaction
 |-----------|------------|
 | OS | Windows 10 or Windows 11 (x64) |
 | Python | 3.11.x (validated: 3.11.9) |
-| Webcam | USB or integrated, 640×480 minimum |
+| Webcam | USB or integrated; 640×480 or higher recommended |
 | RAM | ≥ 4 GB recommended |
 | GPU | Not required |
 
@@ -112,7 +113,7 @@ SmartGestureOS/
 ├── config.py                  # Settings loader
 ├── src/
 │   ├── camera.py              # Threaded camera capture with reconnect
-│   ├── gesture_detector.py    # MediaPipe LIVE_STREAM integration
+│   ├── gesture_detector.py    # Synchronous MediaPipe VIDEO inference
 │   ├── gesture_classifier.py  # Geometric gesture recognition
 │   ├── event_engine.py        # Temporal state machine (click/drag/scroll)
 │   ├── gesture_mapper.py      # Mode-aware action routing
@@ -159,11 +160,17 @@ Build a Windows installer:
 # Step 1: Build ONEDIR executable
 .\scripts\build_windows.ps1
 
-# Step 2: Create installer (requires Inno Setup 6+)
-iscc packaging\windows\SmartGestureOS.iss
+# Step 2: Create installer (requires Inno Setup 6+ and ISCC.exe on PATH)
+.\scripts\build_installer.ps1
 ```
 
-Output: `release\SmartGestureOS-Setup-v1.0.0.exe`
+Output: `dist\release\SmartGestureOS-Setup-v0.9.0.exe`
+
+To build an MSIX, first create the ONEDIR build, then supply real PNG artwork in
+`packaging\windows\msix\Assets\` and the exact Identity and Publisher values
+from Partner Center in `AppxManifest.xml`. Run `scripts\build_msix.ps1`; it
+validates these inputs and writes to `dist\release\`. It does not create fake
+assets or invent a Store identity.
 
 ---
 

@@ -54,6 +54,21 @@ def _make_landmarks(index_x=640, index_y=360, y_norm=0.5):
 
 
 class TestInputControlRegression:
+    def test_pointer_smoothing_setting_updates_live_filter_cutoff(self):
+        engine, mc, vm, _ = _make_mock_mouse_and_engine()
+        vm.smoother.update(1.0, 0.0, 0.0)
+
+        with patch("config.SETTINGS", {"gestures": {"sensitivity": 0.7, "smoothing": 1}}):
+            mc.on_settings_changed()
+        responsive_cutoff = vm.smoother.filter_x.min_cutoff
+
+        with patch("config.SETTINGS", {"gestures": {"sensitivity": 0.7, "smoothing": 20}}):
+            mc.on_settings_changed()
+        smooth_cutoff = vm.smoother.filter_x.min_cutoff
+
+        assert responsive_cutoff > smooth_cutoff
+        assert vm.smoother.min_cutoff == smooth_cutoff
+
     def test_cursor_path(self):
         """Test Pointing gesture translates index fingertip to SetCursorPos along a moving path."""
         engine, mc, vm, fake_user32 = _make_mock_mouse_and_engine()

@@ -61,7 +61,7 @@ class TestHandPipelineRegression:
         det.detect_async(dummy_img, 999)
 
         # The internal timestamps must be strictly increasing
-        calls = mock_inst.detect_async.call_args_list
+        calls = mock_inst.detect_for_video.call_args_list
         assert len(calls) == 3
         ts0 = calls[0][0][1]
         ts1 = calls[1][0][1]
@@ -71,6 +71,14 @@ class TestHandPipelineRegression:
         assert ts1 == 1001
         assert ts2 == 1002
         assert det.frames_submitted == 3
+
+    def test_process_frame_rejects_invalid_image_without_raising(self):
+        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
+            mock_create.return_value = MagicMock()
+            det = GestureDetector()
+
+        assert det.process_frame(None, 1000) is None
+        assert det.frames_processed == 0
 
     def test_stale_reset_does_not_reject_future_results(self):
         """Phase I: Verify stale reset does not reject future valid callbacks."""
@@ -153,3 +161,20 @@ class TestHandPipelineRegression:
 
         # Pixels must be modified (colored lines and circles drawn)
         assert test_frame.sum() > 0
+
+    def test_detected_hand_landmarks_cycle_through_rgb_colors(self):
+        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
+            mock_create.return_value = MagicMock()
+            det = GestureDetector()
+
+        landmarks = [Landmark(id=i, pixel_x=32, pixel_y=32, x=0.5, y=0.5, z=0.0) for i in range(21)]
+        red_frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        green_frame = np.zeros_like(red_frame)
+
+        det.draw_landmarks(red_frame, landmarks, color_phase=0.0)
+        det.draw_landmarks(green_frame, landmarks, color_phase=1.0 / 3.0)
+
+        red_ring = red_frame[32, 36]
+        green_ring = green_frame[32, 36]
+        assert tuple(red_ring) == (0, 0, 255)
+        assert tuple(green_ring) == (0, 255, 0)

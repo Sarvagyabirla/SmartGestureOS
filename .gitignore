@@ -39,6 +39,13 @@ dist/
 screenshots/
 benchmarks/
 
+# Local diagnostic images and webcam captures
+/diagnostics/frames/
+/diagnostics/hand_probe/
+/webcam_snapshot.jpg
+/test_hand.jpg
+/tests/test_hand.jpg
+
 # OS files
 .DS_Store
 Thumbs.db

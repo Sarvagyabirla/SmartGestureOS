@@ -325,7 +325,7 @@ class MainApp:
         while self.running:
             loop_start = time.perf_counter()
             try:
-                frame, frame_id = self.camera.read()
+                frame, frame_id, captured_at = self.camera.read_with_timestamp()
                 is_connected = self.camera.is_connected
 
                 # ── Camera disconnect branch ──────────────────────────────────
@@ -389,7 +389,8 @@ class MainApp:
 
                     inference_interval = 1.0 / 5.0 if self.mapper.is_sleeping else 1.0 / 30.0
 
-                    # 1. Send frame to async ML pipeline
+                    # 1. Run inference synchronously if interval passed
+                    has_new_result = False
                     if current_time - last_inference_time >= inference_interval:
                         timestamp_ms = int(current_time * 1000)
                         if timestamp_ms <= last_timestamp_ms:
@@ -397,37 +398,25 @@ class MainApp:
                         last_timestamp_ms = timestamp_ms
 
                         small_frame = cv2.resize(frame, (640, 360))
-                        self.detector.detect_async(small_frame, timestamp_ms)
+
+                        results = self.detector.process_frame(small_frame, timestamp_ms)
+                        if results is not None:
+                            last_result_receive_time = time.perf_counter()
+                            has_new_result = True
+
                         last_inference_time = current_time
 
-                    # 2. Consume latest ML result (drain queue, keep newest valid; apply TTL (§9))
-                    result_ts, results = None, None
-                    while not self.detector.results_queue.empty():
-                        try:
-                            q_ts, q_res = self.detector.results_queue.get_nowait()
-                            if q_ts >= min_accepted_timestamp_ms:
-                                result_ts, results = q_ts, q_res
-                            else:
-                                logger.debug(
-                                    f"Discarding stale result {q_ts} < {min_accepted_timestamp_ms}"
-                                )
-                        except queue.Empty:
-                            break
+                        if results is not None:
+                            latest_hands_data = self.detector.get_all_hands_data(
+                                results, frame.shape
+                            )
+                            result_obj = self.classifier.classify(latest_hands_data)
+                            latest_stable_gesture = result_obj.gesture
+                            latest_raw_gesture    = result_obj.raw_gesture
+                            latest_confidence     = int(result_obj.confidence)
 
-                    if result_ts is not None:
-                        last_result_receive_time = current_time
-                        latency_ms = int(time.perf_counter() * 1000) - result_ts
-                        self.latency_history.append(latency_ms)
-
-                        latest_hands_data = self.detector.get_all_hands_data(
-                            results, frame.shape
-                        )
-                        result_obj = self.classifier.classify(latest_hands_data)
-                        latest_stable_gesture = result_obj.gesture
-                        latest_raw_gesture    = result_obj.raw_gesture
-                        latest_confidence     = int(result_obj.confidence)
-
-                    if result_ts is None and current_time - last_result_receive_time > 0.25:
+                    # 2. TTL Check (§9)
+                    if not has_new_result and current_time - last_result_receive_time > 0.25:
                         # Stale ML TTL — clear and reset (§9)
                         if latest_hands_data is not None:
                             logger.warning("Stale MediaPipe TTL — releasing automation state.")
@@ -485,6 +474,13 @@ class MainApp:
                         # Hand lost — mapper calls on_hand_lost internally
                         display_frame, latest_action, latest_progress = self.mapper.process(
                             [], "None", "None", display_frame
+                        )
+
+                    # Camera capture through gesture routing; detector-only time is
+                    # tracked separately by GestureDetector.average_inference_latency.
+                    if has_new_result and captured_at is not None:
+                        self.latency_history.append(
+                            int((time.perf_counter() - captured_at) * 1000)
                         )
 
                     # Rate-limited input pipeline diagnostics (every 1.0s)
