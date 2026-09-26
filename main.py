@@ -21,7 +21,7 @@ class MainApp:
     _REARM_ARMED    = "armed"       # full automation active
     _REARM_NEUTRAL_REQUIRED: int = 5  # frames of neutral required to arm
 
-    def __init__(self):
+    def __init__(self, start_paused: bool = False):
         self.camera = Camera(
             index=SETTINGS["camera"]["index"],
             width=SETTINGS["camera"]["width"],
@@ -60,10 +60,12 @@ class MainApp:
         # ── Automation state (§5) ─────────────────────────────────────────────
         # Thread-safe: protected by _automation_lock.
         # Only set_automation_enabled() mutates _automation_enabled.
-        self._automation_lock: threading.Lock = threading.Lock()
-        self._automation_enabled: bool = True
-        self._rearm_state: str = self._REARM_ARMED
+        self._automation_lock = threading.RLock()
+        self._automation_enabled: bool = not start_paused
+        self._rearm_state: str = self._REARM_IDLE if start_paused else self._REARM_ARMED
         self._rearm_neutral_frames: int = 0
+        self._tracking_generation: int = 0
+        self._tracking_capture_time: float | None = None
 
         # Shutdown guard (§47)
         self._shutdown_started: bool = False
@@ -87,38 +89,53 @@ class MainApp:
                 "Global shortcut unavailable; UI pause button still works."
             )
 
+        if start_paused:
+            self._invalidate_tracking()
+            logger.info("Starting with automation PAUSED; live tracking remains visible.")
         self.start_system()
 
     # ── Automation state management (§5) ─────────────────────────────────────
 
     def set_automation_enabled(self, enabled: bool) -> None:
-        """
-        Single authoritative method to enable/disable automation.
-        Thread-safe — can be called from the keyboard callback thread or Tk.
-        Both the UI button and the global hotkey call this.
-        """
+        """Change automation atomically with action routing and reset state."""
         with self._automation_lock:
             if enabled == self._automation_enabled:
-                logger.debug(f"set_automation_enabled({enabled}) ignored: already {enabled}")
                 return
             self._automation_enabled = enabled
+            self._invalidate_tracking()
+            if not enabled:
+                self._rearm_state = self._REARM_IDLE
+                logger.info("Automation PAUSED - all state released.")
+            else:
+                self._rearm_state = self._REARM_WAITING
+                logger.info("Automation RESUMED - waiting for neutral before arming.")
 
-        logger.info(f"set_automation_enabled executing: enabled={enabled}")
-        if not enabled:
-            # ── Pause: release everything (§6) ────────────────────────────
+    def _invalidate_tracking(self) -> None:
+        """Release input and invalidate observations from before this reset."""
+        with self._automation_lock:
+            self._tracking_generation += 1
+            self._tracking_capture_time = None
+            self._rearm_neutral_frames = 0
+            # Release first, even if resetting a downstream controller fails.
             self.mapper.mouse.release_all()
-            if hasattr(self.mapper.mouse, "engine"):
-                self.mapper.mouse.engine.reset()
             self.mapper.reset_temporal_state()
             self.classifier.reset()
-            self._rearm_state = self._REARM_IDLE
-            self._rearm_neutral_frames = 0
-            logger.info("Automation PAUSED — all state released.")
-        else:
-            # ── Resume: enter re-arm waiting state (§7) ───────────────────
-            self._rearm_state = self._REARM_WAITING
-            self._rearm_neutral_frames = 0
-            logger.info("Automation RESUMED — waiting for neutral gesture before arming.")
+
+    def _expire_tracking(self) -> bool:
+        """UI-thread watchdog also releases input while native inference stalls."""
+        with self._automation_lock:
+            captured_at = self._tracking_capture_time
+            if captured_at is None or time.perf_counter() - captured_at <= 0.25:
+                return False
+            self._invalidate_tracking()
+            # Do not display a preview queued before the watchdog reset.
+            try:
+                while not self.frame_queue.empty():
+                    self.frame_queue.get_nowait()
+            except queue.Empty:
+                pass
+            logger.warning("Tracking watchdog expired; input released.")
+            return True
 
     def _hotkey_toggle_automation(self) -> None:
         """Called by keyboard library (possibly off main thread)."""
@@ -188,7 +205,7 @@ class MainApp:
         self.running = True
 
         self.process_thread = threading.Thread(
-            target=self.processing_loop, daemon=True, name="process"
+            target=self._run_processing, daemon=True, name="process"
         )
         self.process_thread.start()
 
@@ -200,6 +217,13 @@ class MainApp:
         self.update_ui_loop()
 
     # ── Monitoring ────────────────────────────────────────────────────────────
+
+    def _run_processing(self) -> None:
+        try:
+            self.processing_loop()
+        finally:
+            # Native shutdown belongs to the thread that performs inference.
+            self.detector.close()
 
     def monitoring_loop(self) -> None:
         try:
@@ -243,7 +267,11 @@ class MainApp:
                 return
             self._shutdown_started = True
 
-        self.running = False
+        with self._automation_lock:
+            self.running = False
+            self._automation_enabled = False
+            self._invalidate_tracking()
+            self.mapper.cleanup()
 
         # Unblock queues to prevent thread deadlock
         try:
@@ -252,14 +280,7 @@ class MainApp:
         except queue.Empty:
             pass
 
-        # Safety: release all desktop automation before shutdown
-        if hasattr(self, "mapper"):
-            self.mapper.cleanup()
-
         self.camera.stop()
-
-        if hasattr(self, "detector"):
-            self.detector.close()
 
         # Unregister global hotkey (§5)
         if self._hotkey_handle is not None:
@@ -273,6 +294,8 @@ class MainApp:
 
         if self.process_thread and self.process_thread.is_alive():
             self.process_thread.join(timeout=2.0)
+        if not self.process_thread or not self.process_thread.is_alive():
+            self.detector.close()
         if self.stats_thread and self.stats_thread.is_alive():
             self.stats_thread.join(timeout=1.0)
 
@@ -301,241 +324,199 @@ class MainApp:
     # ── Processing loop ───────────────────────────────────────────────────────
 
     def processing_loop(self) -> None:
-        last_frame_id: int = -1
-        last_inference_time: float = 0.0
-        last_timestamp_ms: int = -1
-        inference_interval: float = 1.0 / 30.0
-
-        # Stale result invalidation (§9)
-        min_accepted_timestamp_ms: int = 0
-
-        self.fps_history = collections.deque(maxlen=30)
-        self.latency_history = collections.deque(maxlen=30)
-
-        latest_hands_data = None
-        latest_stable_gesture = "Unknown"
-        latest_raw_gesture = "Unknown"
+        last_frame_id = -1
+        last_inference_time = 0.0
+        last_capture_time = time.perf_counter()
+        last_preview_time = None
+        observed_generation = self._tracking_generation
+        tracking_valid = False
+        latest_hands_data = []
+        latest_stable_gesture = latest_raw_gesture = "Unknown"
         latest_confidence = 0
         latest_action = None
         latest_progress = 0.0
+        self.fps_history = collections.deque(maxlen=30)
+        self.latency_history = collections.deque(maxlen=30)
 
-        last_result_receive_time = time.perf_counter()
-        last_input_log_time = 0.0
+        def clear_observation():
+            nonlocal latest_hands_data, latest_stable_gesture, latest_raw_gesture
+            nonlocal latest_confidence, latest_action, latest_progress, tracking_valid
+            latest_hands_data = []
+            latest_stable_gesture = latest_raw_gesture = "Unknown"
+            latest_confidence = 0
+            latest_action = None
+            latest_progress = 0.0
+            tracking_valid = False
+
+        def invalidate(reason):
+            nonlocal observed_generation
+            if tracking_valid:
+                logger.info("Tracking reset: %s", reason)
+            self._invalidate_tracking()
+            observed_generation = self._tracking_generation
+            clear_observation()
+
+        def publish(frame, connected, fps=0):
+            avg_latency = (int(sum(self.latency_history) / len(self.latency_history))
+                           if self.latency_history else 0)
+            try:
+                if self.frame_queue.full():
+                    self.frame_queue.get_nowait()
+                self.frame_queue.put_nowait((
+                    frame, latest_hands_data, self.mapper.mode,
+                    latest_stable_gesture, latest_raw_gesture, latest_confidence,
+                    latest_action, fps, self.cpu_usage, self.ram_usage,
+                    connected, self.mapper.is_sleeping, avg_latency,
+                    self.automation_enabled,
+                ))
+            except (queue.Empty, queue.Full):
+                pass
+
+        def status_frame(message):
+            import numpy as np
+            frame = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)
+            cv2.putText(frame, message, (30, self.camera.height // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            return frame
 
         while self.running:
             loop_start = time.perf_counter()
             try:
+                with self._automation_lock:
+                    if observed_generation != self._tracking_generation:
+                        clear_observation()
+                        observed_generation = self._tracking_generation
                 frame, frame_id, captured_at = self.camera.read_with_timestamp()
                 is_connected = self.camera.is_connected
 
-                # ── Camera disconnect branch ──────────────────────────────────
                 if not is_connected:
-                    if self._was_camera_connected:
-                        logger.warning("Camera disconnected — releasing automation state.")
-                        self.mapper.mouse.release_all()
-                        self.mapper.reset_temporal_state()
-                        self.classifier.reset()
-                        # Invalidate prior queued results (§9)
-                        min_accepted_timestamp_ms = (
-                            self.detector.last_submitted_timestamp_ms + 1
-                            if hasattr(self.detector, "last_submitted_timestamp_ms")
-                            and self.detector.last_submitted_timestamp_ms > 0
-                            else int(time.perf_counter() * 1000)
-                        )
-                        self.detector.clear_results()
-                        latest_hands_data = None
-                        latest_stable_gesture = "Unknown"
-                        latest_raw_gesture = "Unknown"
-                        latest_confidence = 0
-                        latest_action = None
-                        latest_progress = 0.0
+                    if self._was_camera_connected or tracking_valid:
+                        invalidate("camera disconnected")
                     self._was_camera_connected = False
-
-                    import numpy as np
-                    err_frame = np.zeros(
-                        (self.camera.height, self.camera.width, 3), dtype=np.uint8
-                    )
-                    cv2.putText(
-                        err_frame,
-                        "CAMERA DISCONNECTED - RECOVERING...",
-                        (50, self.camera.height // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2,
-                    )
-                    try:
-                        if self.frame_queue.full():
-                            self.frame_queue.get_nowait()
-                        mode     = getattr(self.mapper, "mode", "GENERAL")
-                        sleeping = getattr(self.mapper, "is_sleeping", False)
-                        self.frame_queue.put_nowait((
-                            err_frame, [], mode, "Unknown", "Unknown", 0,
-                            None, 0, self.cpu_usage, self.ram_usage,
-                            False, sleeping, 0, self.automation_enabled,
-                        ))
-                    except (queue.Empty, queue.Full):
-                        pass
+                    publish(status_frame("CAMERA DISCONNECTED - RECOVERING..."), False)
                     time.sleep(0.1)
                     continue
 
-                # Camera is connected
                 self._was_camera_connected = True
+                now = time.perf_counter()
+                # Check even when read() has no new frames: a stalled driver can
+                # stay connected while holding an old drag/gesture indefinitely.
+                if tracking_valid and now - last_capture_time > 0.25:
+                    invalidate("camera frame expired")
 
-                if frame is not None and frame_id != last_frame_id:
+                if frame is None or frame_id == last_frame_id:
+                    if now - last_capture_time > 0.25:
+                        publish(status_frame("WAITING FOR FRESH CAMERA FRAMES..."), True)
+                else:
                     last_frame_id = frame_id
-                    current_time = time.perf_counter()
+                    capture_time = captured_at if captured_at is not None else now
+                    if now - capture_time > 0.25:
+                        invalidate("stale captured frame")
+                        publish(status_frame("WAITING FOR FRESH CAMERA FRAMES..."), True)
+                        continue
 
-                    # ── Propagate actual frame dimensions to mapper (§10) ─────
-                    actual_h, actual_w = frame.shape[:2]
-                    self.mapper.update_frame_dimensions(actual_w, actual_h)
+                    with self._automation_lock:
+                        actual_h, actual_w = frame.shape[:2]
+                        self.mapper.update_frame_dimensions(actual_w, actual_h)
+                        inference_interval = 1.0 / (5.0 if self.mapper.is_sleeping else 30.0)
+                        inference_generation = self._tracking_generation
 
-                    inference_interval = 1.0 / 5.0 if self.mapper.is_sleeping else 1.0 / 30.0
-
-                    # 1. Run inference synchronously if interval passed
                     has_new_result = False
-                    if current_time - last_inference_time >= inference_interval:
-                        timestamp_ms = int(current_time * 1000)
-                        if timestamp_ms <= last_timestamp_ms:
-                            timestamp_ms = last_timestamp_ms + 1
-                        last_timestamp_ms = timestamp_ms
-
+                    if now - last_inference_time >= inference_interval:
+                        last_inference_time = now
                         small_frame = cv2.resize(frame, (640, 360))
+                        results = self.detector.process_frame(small_frame, int(now * 1000))
+                        with self._automation_lock:
+                            if not self.running:
+                                break
+                            if inference_generation != self._tracking_generation:
+                                # Pause/resume happened during native inference.
+                                clear_observation()
+                                observed_generation = self._tracking_generation
+                            elif results is None or time.perf_counter() - capture_time > 0.25:
+                                invalidate("inference failed or frame expired")
+                            else:
+                                hands = self.detector.get_all_hands_data(results, frame.shape)
+                                if latest_hands_data and not hands:
+                                    invalidate("hand left frame")
+                                latest_hands_data = hands
+                                result = self.classifier.classify(hands)
+                                latest_stable_gesture = result.gesture
+                                latest_raw_gesture = result.raw_gesture
+                                latest_confidence = int(result.confidence)
+                                tracking_valid = True
+                                has_new_result = True
+                                last_capture_time = capture_time
+                                self._tracking_capture_time = capture_time
 
-                        results = self.detector.process_frame(small_frame, timestamp_ms)
-                        if results is not None:
-                            last_result_receive_time = time.perf_counter()
-                            has_new_result = True
-
-                        last_inference_time = current_time
-
-                        if results is not None:
-                            latest_hands_data = self.detector.get_all_hands_data(
-                                results, frame.shape
-                            )
-                            result_obj = self.classifier.classify(latest_hands_data)
-                            latest_stable_gesture = result_obj.gesture
-                            latest_raw_gesture    = result_obj.raw_gesture
-                            latest_confidence     = int(result_obj.confidence)
-
-                    # 2. TTL Check (§9)
-                    if not has_new_result and current_time - last_result_receive_time > 0.25:
-                        # Stale ML TTL — clear and reset (§9)
-                        if latest_hands_data is not None:
-                            logger.warning("Stale MediaPipe TTL — releasing automation state.")
-                            self.mapper.mouse.release_all()
-                            self.mapper.reset_temporal_state()
-                            self.classifier.reset()
-                            self.detector.clear_results()
-                        latest_hands_data = None
-                        latest_stable_gesture = "Unknown"
-                        latest_raw_gesture    = "Unknown"
-                        latest_confidence     = 0
-
-                    # 3. Apply mapper using current ML result
                     display_frame = frame.copy()
-
-                    # Report detector availability clearly (Phase B)
                     if not self.detector.available:
-                        cv2.putText(
-                            display_frame,
-                            f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
-                            (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2,
-                        )
+                        cv2.putText(display_frame,
+                                    f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
+                                    (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    for hand in latest_hands_data:
+                        self.detector.draw_landmarks(display_frame, hand["landmarks"])
 
-                    # Draw landmarks whenever hand data exists (Phase G)
-                    if latest_hands_data:
-                        for hand_data in latest_hands_data:
-                            self.detector.draw_landmarks(display_frame, hand_data["landmarks"])
+                    # No action may start after pause/reset completes. Never
+                    # count the same inference twice toward re-arm or a hold.
+                    with self._automation_lock:
+                        if not self.running:
+                            break
+                        if observed_generation != self._tracking_generation:
+                            clear_observation()
+                            observed_generation = self._tracking_generation
+                            has_new_result = False
+                        if not self._automation_enabled:
+                            latest_action, latest_progress = "Paused", 0.0
+                            cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        elif has_new_result:
+                            if not self._tick_rearm(latest_stable_gesture):
+                                latest_action, latest_progress = "Re-arming", 0.0
+                                cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
+                                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+                            else:
+                                display_frame, latest_action, latest_progress = self.mapper.process(
+                                    latest_hands_data, latest_stable_gesture,
+                                    latest_raw_gesture, display_frame,
+                                )
+                                display_frame = self.draw_overlays(
+                                    display_frame, latest_hands_data, latest_progress,
+                                )
 
-                    if not self.automation_enabled:
-                        cv2.putText(
-                            display_frame, "AUTOMATION PAUSED",
-                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2,
-                        )
-                        latest_action = "Paused"
-                        latest_progress = 0.0
-
-                    elif not self._tick_rearm(latest_stable_gesture):
-                        # Re-arm waiting — show camera but don't act
-                        cv2.putText(
-                            display_frame, "RESUMING - WAITING FOR NEUTRAL",
-                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2,
-                        )
-                        latest_action = "Re-arming"
-                        latest_progress = 0.0
-
-                    elif latest_hands_data:
-                        display_frame, latest_action, latest_progress = self.mapper.process(
-                            latest_hands_data, latest_stable_gesture,
-                            latest_raw_gesture, display_frame,
-                        )
-                        display_frame = self.draw_overlays(
-                            display_frame, latest_hands_data, latest_progress
-                        )
-                    else:
-                        # Hand lost — mapper calls on_hand_lost internally
-                        display_frame, latest_action, latest_progress = self.mapper.process(
-                            [], "None", "None", display_frame
-                        )
-
-                    # Camera capture through gesture routing; detector-only time is
-                    # tracked separately by GestureDetector.average_inference_latency.
-                    if has_new_result and captured_at is not None:
-                        self.latency_history.append(
-                            int((time.perf_counter() - captured_at) * 1000)
-                        )
-
-                    # Rate-limited input pipeline diagnostics (every 1.0s)
-                    if latest_hands_data and current_time - last_input_log_time >= 1.0:
-                        h1 = latest_hands_data[0]["landmarks"]
-                        engine_state = (
-                            self.mapper.mouse.engine.state.name
-                            if hasattr(self.mapper, "mouse") and hasattr(self.mapper.mouse, "engine")
-                            else "N/A"
-                        )
-                        logger.debug(
-                            f"InputPipeline: raw='{latest_raw_gesture}', "
-                            f"stable='{latest_stable_gesture}', conf={latest_confidence}%, "
-                            f"engine_state={engine_state}, action='{latest_action}', "
-                            f"index_tip=({h1[8].pixel_x}, {h1[8].pixel_y})"
-                        )
-                        last_input_log_time = current_time
-
-                    # Telemetry
-                    time_diff = time.perf_counter() - loop_start
-                    current_fps = (1.0 / time_diff) if time_diff > 0 else 60.0
-                    self.fps_history.append(current_fps)
-                    fps = int(sum(self.fps_history) / len(self.fps_history))
-                    avg_latency = (
-                        int(sum(self.latency_history) / len(self.latency_history))
-                        if self.latency_history else 0
-                    )
-
-                    try:
-                        if self.frame_queue.full():
-                            self.frame_queue.get_nowait()
-                        self.frame_queue.put_nowait((
-                            display_frame, latest_hands_data,
-                            self.mapper.mode, latest_stable_gesture,
-                            latest_raw_gesture, latest_confidence,
-                            latest_action, fps,
-                            self.cpu_usage, self.ram_usage,
-                            is_connected, self.mapper.is_sleeping,
-                            avg_latency, self.automation_enabled,
-                        ))
-                    except (queue.Empty, queue.Full):
-                        pass
+                    if has_new_result:
+                        self.latency_history.append(int((time.perf_counter() - capture_time) * 1000))
+                    preview_time = time.perf_counter()
+                    if last_preview_time is not None:
+                        self.fps_history.append(preview_time - last_preview_time)
+                    last_preview_time = preview_time
+                    # Actual preview cadence, including capture/inference waits.
+                    fps = int(len(self.fps_history) / sum(self.fps_history)) if self.fps_history else 0
+                    publish(display_frame, True, fps)
 
             except Exception:
                 logger.exception("Error in processing loop:")
+                invalidate("processing error")
+                publish(status_frame("TRACKING ERROR - RETRYING..."), self.camera.is_connected)
 
             elapsed = time.perf_counter() - loop_start
-            sleep_time = (1.0 / 60.0) - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-    # ── UI update ─────────────────────────────────────────────────────────────
+            if elapsed < 1.0 / 60.0:
+                time.sleep(1.0 / 60.0 - elapsed)
 
     def update_ui_loop(self) -> None:
         try:
+            if self._expire_tracking():
+                import numpy as np
+                frame = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)
+                cv2.putText(frame, "WAITING FOR FRESH TRACKING...", (30, self.camera.height // 2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                self.ui.current_hands_data = []
+                self.ui.update_dashboard(
+                    self.mapper.mode, "Unknown", "Unknown", 0, None, 0,
+                    self.cpu_usage, self.ram_usage, self.camera.is_connected,
+                    self.mapper.is_sleeping, 0, self.automation_enabled,
+                )
+                self.ui.update_frame(frame)
             if not self.frame_queue.empty():
                 (
                     frame, hands_data, mode, stable_gesture, raw_gesture,
@@ -549,10 +530,24 @@ class MainApp:
                     camera_on, is_sleeping, avg_latency, automation_enabled,
                 )
                 self.ui.update_frame(frame)
+                now = time.perf_counter()
+                if now - getattr(self, "_last_preview_log_time", 0.0) >= 1.0:
+                    landmarks = hands_data[0]["landmarks"] if hands_data else []
+                    tip = ((landmarks[8].pixel_x, landmarks[8].pixel_y)
+                           if len(landmarks) == 21 else None)
+                    logger.debug(
+                        "Preview: camera=%s hands=%d landmarks=%d index_tip=%s "
+                        "raw=%s stable=%s fps=%d input_ms=%d inference_ms=%.1f automation=%s",
+                        camera_on, len(hands_data), len(landmarks), tip,
+                        raw_gesture, stable_gesture, fps, avg_latency,
+                        self.detector.average_inference_latency, automation_enabled,
+                    )
+                    self._last_preview_log_time = now
         except Exception:
             logger.exception("Error in UI update loop:")
 
-        self.ui.after(15, self.update_ui_loop)
+        if self.running:
+            self.ui.after(15, self.update_ui_loop)
 
     # ── Main ──────────────────────────────────────────────────────────────────
 
@@ -566,5 +561,10 @@ class MainApp:
 
 
 if __name__ == "__main__":
-    app = MainApp()
+    import argparse
+    parser = argparse.ArgumentParser(description="SmartGestureOS desktop application")
+    parser.add_argument("--start-paused", action="store_true",
+                        help="Show live tracking with desktop automation initially paused")
+    args = parser.parse_args()
+    app = MainApp(start_paused=args.start_paused)
     app.run()

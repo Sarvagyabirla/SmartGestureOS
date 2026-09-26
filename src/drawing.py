@@ -61,6 +61,13 @@ class DrawingCanvas:
 
     # ── Drawing ───────────────────────────────────────────────────────────────
 
+    def end_stroke(self) -> None:
+        """Forget tracking coordinates without changing the drawing or history."""
+        self.is_drawing = False
+        self.last_point = None
+        self.smoother.reset()
+        self.hover_smoother.reset()
+
     def resize(self, new_width: int, new_height: int) -> "ActionResult":
         from src.models import ActionResult
         import time

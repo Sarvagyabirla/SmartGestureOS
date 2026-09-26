@@ -158,9 +158,16 @@ class EventEngine:
         elif self.state == EventState.PINCH_RELEASE_WAIT:
             is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
             if is_pinching:
-                # Second pinch within double-click window
-                self.mouse.mouse.double_click()
-                self._change_state(EventState.COOLDOWN)
+                if now - self.pinch_release_time <= self.double_click_window_ms:
+                    # Second pinch within double-click window
+                    self.mouse.mouse.double_click()
+                    self._change_state(EventState.COOLDOWN)
+                else:
+                    # The first click expired. Commit it and treat this as a
+                    # fresh pinch so it can become its own click or drag.
+                    self.mouse.mouse.click(button="left")
+                    self.pinch_down_time = now
+                    self._change_state(EventState.PINCH_DOWN)
             elif now - self.pinch_release_time > self.double_click_window_ms:
                 # Window elapsed — perform single click
                 self.mouse.mouse.click(button="left")

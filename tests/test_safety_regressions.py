@@ -5,7 +5,7 @@ Covers:
 - Emergency pause: releases all state
 - Re-arm guard: automation stays disarmed until neutral observed
 - Temporal reset: hand loss, camera loss, stale detector TTL
-- Stale callback invalidation (min_accepted_timestamp_ms)
+- Tracking generation invalidation across pause/resume
 - Drawing canvas resize integration
 - ActionResult from all action controllers
 - Trainer deep validation
@@ -53,7 +53,8 @@ class TestAutomationState:
         import main as m_module
         # Create instance attributes directly — no real threads
         obj = object.__new__(m_module.MainApp)
-        obj._automation_lock = threading.Lock()
+        obj._automation_lock = threading.RLock()
+        obj._tracking_generation = 0
         obj._automation_enabled = True
         obj._rearm_state = m_module.MainApp._REARM_ARMED
         obj._rearm_neutral_frames = 0
@@ -409,34 +410,26 @@ class TestMapperFeedback:
 
 # ── Stale result invalidation (§9) ────────────────────────────────────────────
 
-class TestStaleResultInvalidation:
-    def test_clear_results_drains_queue(self):
-        from src.gesture_detector import GestureDetector
-        with patch("src.gesture_detector.vision.HandLandmarker"):
-            det = GestureDetector()
-        det.results_queue.put((100, MagicMock()))
-        det.results_queue.put((200, MagicMock()))
-        assert not det.results_queue.empty()
-        det.clear_results()
-        assert det.results_queue.empty()
+class TestTrackingInvalidation:
+    def test_invalidation_releases_input_and_resets_current_observation(self):
+        obj, _ = TestAutomationState()._make_main()
+        obj._rearm_neutral_frames = 4
+        obj._invalidate_tracking()
+        assert obj._tracking_generation == 1
+        assert obj._rearm_neutral_frames == 0
+        obj.mapper.mouse.release_all.assert_called_once()
+        obj.mapper.reset_temporal_state.assert_called_once()
+        obj.classifier.reset.assert_called_once()
 
-    def test_min_accepted_timestamp_rejects_old_results(self):
-        """
-        Simulate the main loop logic: result with ts < min_accepted should be
-        discarded even if it arrives in the queue.
-        """
-        min_accepted = 5000
-        old_ts = 4999
-        new_ts = 6000
+    def test_pause_and_resume_each_invalidate_in_flight_observations(self):
+        obj, _ = TestAutomationState()._make_main()
+        initial_generation = obj._tracking_generation
+        obj.set_automation_enabled(False)
+        assert obj._tracking_generation == initial_generation + 1
+        obj.set_automation_enabled(True)
+        assert obj._tracking_generation == initial_generation + 2
+        assert obj._rearm_state == obj._REARM_WAITING
 
-        # Old result — should be discarded
-        assert old_ts < min_accepted
-
-        # New result — should be accepted
-        assert new_ts >= min_accepted
-
-
-# ── Custom gesture deep validation (§20, §21) ─────────────────────────────────
 
 class TestCustomGestureValidation:
     def test_add_sample_rejects_builtin_name_case_insensitive(self):

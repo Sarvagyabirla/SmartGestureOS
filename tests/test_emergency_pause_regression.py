@@ -41,7 +41,8 @@ def _21_landmarks(x=0.5, y=0.5):
 def simulated_app():
     """Build a lightweight MainApp instance without opening hardware or threads."""
     app = object.__new__(m_module.MainApp)
-    app._automation_lock = threading.Lock()
+    app._automation_lock = threading.RLock()
+    app._tracking_generation = 0
     app._automation_enabled = True
     app._rearm_state = m_module.MainApp._REARM_ARMED
     app._rearm_neutral_frames = 0
