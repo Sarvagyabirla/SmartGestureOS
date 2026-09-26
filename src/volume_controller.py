@@ -7,6 +7,8 @@ give accurate success/failure feedback.
 Rate-limiting uses time.perf_counter() for monotonic behavior.
 """
 import time
+import math
+import threading
 from .models import ActionResult
 from .logger import logger
 
@@ -20,38 +22,37 @@ class VolumeController:
         self.volume = None
         self.min_vol: float = -65.25
         self.max_vol: float = 0.0
+        self._com_thread: int | None = None
 
-        try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    def initialize(self) -> bool:
+        """Acquire the endpoint on the thread that will execute audio actions."""
+        return self._try_reacquire()
 
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            self.volume = cast(interface, POINTER(IAudioEndpointVolume))
-
-            vol_range = self.volume.GetVolumeRange()
-            self.min_vol = vol_range[0]
-            self.max_vol = vol_range[1]
-            logger.info("VolumeController initialized successfully.")
-        except Exception as e:
-            logger.warning(
-                f"Could not initialize volume controller: {e}. Volume control disabled."
-            )
+    def close(self) -> None:
+        """Release the endpoint before balancing this thread's COM initialization."""
+        if self._com_thread == threading.get_ident():
+            import comtypes
             self.volume = None
+            self._com_thread = None
+            comtypes.CoUninitialize()
 
     # ── Internal helpers ───────────────────────────────────────────────────────
 
     def _try_reacquire(self) -> bool:
         """Attempt to re-acquire audio endpoint after a failure."""
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            import comtypes
+            from pycaw.pycaw import AudioUtilities
+
+            if self._com_thread is None:
+                comtypes.CoInitialize()
+                self._com_thread = threading.get_ident()
+            elif self._com_thread != threading.get_ident():
+                logger.error("VolumeController called from a different COM thread.")
+                return False
 
             devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            self.volume = cast(interface, POINTER(IAudioEndpointVolume))
+            self.volume = devices.EndpointVolume
             vol_range = self.volume.GetVolumeRange()
             self.min_vol = vol_range[0]
             self.max_vol = vol_range[1]
@@ -76,7 +77,9 @@ class VolumeController:
                                 min_dist: float = 30,
                                 max_dist: float = 250) -> int:
         """Continuous gesture control — returns 0-100 int or 0 on failure."""
-        if not self.volume:
+        if not all(math.isfinite(value) for value in (d_thumb_index, min_dist, max_dist)) or max_dist <= min_dist:
+            return 0
+        if not self.volume and not self._try_reacquire():
             return 0
 
         vol_perc = (d_thumb_index - min_dist) / (max_dist - min_dist)
@@ -96,6 +99,8 @@ class VolumeController:
                     self.volume.SetMasterVolumeLevel(self._current_vol, None)
                 except Exception:
                     return 0
+            else:
+                return 0
         return int(vol_perc * 100)
 
     # ── Discrete actions (each returns ActionResult) ───────────────────────────

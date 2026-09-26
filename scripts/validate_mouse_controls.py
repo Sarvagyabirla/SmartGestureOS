@@ -301,6 +301,7 @@ def main():
         parser.error("This physical check requires Windows 10/11 and a webcam.")
     sys.path.insert(0, str(REPO_ROOT))
     from main import MainApp
+    from src.models import ActionResult
 
     class ValidationApp(MainApp):
         def start_system(self):
@@ -310,7 +311,8 @@ def main():
             self.mapper.get_sleep_gesture = lambda _mappings: None
             self.mapper.set_mode = lambda _mode: None
             self.mapper.cycle_mode = lambda: None
-            self.mapper.brightness.set_brightness_from_y = lambda _y: None
+            self.mapper.brightness.set_brightness_from_y = lambda _y: ActionResult(
+                False, "brightness", "Brightness is disabled during the mouse check")
             self.ui.settings_btn.configure(state="disabled")
             self.ui.train_btn.configure(state="disabled")
             self.target = MouseTarget(self, args.report)

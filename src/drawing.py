@@ -87,6 +87,7 @@ class DrawingCanvas:
             
             self.undo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.undo_stack]
             self.redo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.redo_stack]
+            self.end_stroke()
             
             return ActionResult(True, "resize_canvas", f"Resized to {new_width}x{new_height}", None, t)
         except Exception as e:
@@ -147,7 +148,9 @@ class DrawingCanvas:
     def clear(self) -> "ActionResult":
         from src.models import ActionResult
         import time
+        self.end_stroke()
         self._save_state()
+        self.redo_stack.clear()
         self.canvas = np.zeros((self.height, self.width, 3), np.uint8)
         return ActionResult(True, "clear_canvas", "Canvas cleared", None, time.perf_counter())
 
@@ -159,6 +162,7 @@ class DrawingCanvas:
         if not self.undo_stack:
             return ActionResult(False, "undo", "Undo stack empty", None, time.perf_counter())
         if len(self.undo_stack) > 1 or np.count_nonzero(self.canvas) > 0:
+            self.end_stroke()
             self.redo_stack.append(self.canvas.copy())
             self.canvas = self.undo_stack.pop()
             return ActionResult(True, "undo", "Undo successful", None, time.perf_counter())
@@ -168,7 +172,8 @@ class DrawingCanvas:
         from src.models import ActionResult
         import time
         if self.redo_stack:
-            self.undo_stack.append(self.canvas.copy())
+            self.end_stroke()
+            self._save_state()
             self.canvas = self.redo_stack.pop()
             return ActionResult(True, "redo", "Redo successful", None, time.perf_counter())
         return ActionResult(False, "redo", "No state to redo", None, time.perf_counter())

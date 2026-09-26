@@ -123,12 +123,16 @@ class ShortcutController:
             ("ProgramFiles",  r"Microsoft VS Code\Code.exe"),
         ])
         if not exe:
-            # 2. Try code.cmd shim — but resolve to Code.exe in the same folder
+            # 2. Resolve the shim to a real executable. Standard installations
+            # keep code.cmd in bin/ and Code.exe one directory above it.
             cmd_shim = self._find_exe("code.cmd", [])
             if cmd_shim:
-                candidate = os.path.join(os.path.dirname(cmd_shim), "Code.exe")
-                if os.path.isfile(candidate):
-                    exe = candidate
+                shim_dir = os.path.dirname(cmd_shim)
+                for directory in (shim_dir, os.path.dirname(shim_dir)):
+                    candidate = os.path.join(directory, "Code.exe")
+                    if os.path.isfile(candidate):
+                        exe = candidate
+                        break
         if exe:
             return self._launch_exe(exe)
         return ActionResult(

@@ -220,10 +220,16 @@ class MainApp:
 
     def _run_processing(self) -> None:
         try:
+            # Core Audio interfaces must be acquired and released by the worker
+            # that uses them; camera tracking can continue without an endpoint.
+            self.mapper.volume.initialize()
             self.processing_loop()
         finally:
-            # Native shutdown belongs to the thread that performs inference.
-            self.detector.close()
+            try:
+                self.mapper.volume.close()
+            finally:
+                # Native shutdown belongs to the thread that performs inference.
+                self.detector.close()
 
     def monitoring_loop(self) -> None:
         try:

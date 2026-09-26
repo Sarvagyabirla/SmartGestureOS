@@ -15,12 +15,16 @@ from .logger import logger
 
 class DesktopController:
     def __init__(self):
-        self._last_action_time = 0.0
+        self._last_action_time = float("-inf")
 
     def _action(self, key: str, cooldown: float = 1.0) -> ActionResult:
         now = time.perf_counter()
         if now - self._last_action_time > cooldown:
-            keyboard.send(key)
+            try:
+                keyboard.send(key)
+            except Exception as error:
+                logger.error(f"Desktop shortcut '{key}' failed: {error}")
+                return ActionResult(False, key, f"Could not send {key}", str(error), now)
             self._last_action_time = now
             return ActionResult(True, key, f"Sent {key}", None, now)
         return ActionResult(False, key, "Cooldown active", None, now)

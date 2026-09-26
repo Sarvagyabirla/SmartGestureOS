@@ -1,20 +1,28 @@
 import keyboard
 import time
 
+from .logger import logger
+from .models import ActionResult
+
+
 class PresentationController:
     def __init__(self):
-        self.last_action_time = 0
-        
-    def _action(self, key, cooldown=1.5) -> "ActionResult":
-        from src.models import ActionResult
-        if time.time() - self.last_action_time > cooldown:
-            keyboard.send(key)
-            self.last_action_time = time.time()
-            return ActionResult(True, key, f"Sent {key}", None, time.perf_counter())
-        return ActionResult(False, key, "Cooldown", None, time.perf_counter())
-            
-    def next_slide(self):
-        self._action("right")
-        
-    def prev_slide(self):
-        self._action("left")
+        self.last_action_time = float("-inf")
+
+    def _action(self, key: str, cooldown: float = 1.5) -> ActionResult:
+        now = time.perf_counter()
+        if now - self.last_action_time > cooldown:
+            try:
+                keyboard.send(key)
+            except Exception as error:
+                logger.error(f"Presentation shortcut '{key}' failed: {error}")
+                return ActionResult(False, key, f"Could not send {key}", str(error), now)
+            self.last_action_time = now
+            return ActionResult(True, key, f"Sent {key}", None, now)
+        return ActionResult(False, key, "Cooldown active", None, now)
+
+    def next_slide(self) -> ActionResult:
+        return self._action("right")
+
+    def prev_slide(self) -> ActionResult:
+        return self._action("left")
