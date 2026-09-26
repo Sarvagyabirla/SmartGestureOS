@@ -57,4 +57,5 @@ class MouseController:
     def release_all(self):
         """Release all actions and reset engine state."""
         self.mouse.release_all()
-        self.engine.on_hand_lost()
+        if hasattr(self, "engine"):
+            self.engine.reset()

@@ -20,7 +20,7 @@ class GestureClassifier:
         "what does the geometry look like?" The action hold/intent layer lives
         in GestureHoldTimer inside GestureMapper.
     """
-    def __init__(self, confidence_threshold: float = 70.0):
+    def __init__(self, confidence_threshold: float = 50.0):
         self.tip_ids = [4, 8, 12, 16, 20]
         self.pip_ids = [3, 6, 10, 14, 18]
         self.mcp_ids = [2, 5, 9, 13, 17]
@@ -49,6 +49,7 @@ class GestureClassifier:
         self.pinch_release_threshold = calib.get("pinch_release_threshold", 0.6)
         self.two_finger_max_spacing = calib.get("two_finger_max_spacing", 0.2)
         self.victory_min_spacing = calib.get("victory_min_spacing", 0.35)
+        self.confidence_threshold = calib.get("confidence_threshold", 50.0)
         
     def get_3d_point(self, lm: Landmark):
         return np.array([lm.x, lm.y, lm.z])
@@ -146,7 +147,7 @@ class GestureClassifier:
                 self.is_pinching = False
                 
         d_pinch_to_palm = np.linalg.norm(index_tip - middle_mcp)
-        true_pinch = self.is_pinching and (d_pinch_to_palm > hand_size * 0.5)
+        true_pinch = self.is_pinching and (d_pinch_to_palm > hand_size * 0.32)
         
         # Check palm orientation for thumb up/down using relative y position
         thumb_is_higher_than_mcp = thumb_tip[1] <= middle_mcp[1]

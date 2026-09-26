@@ -3,13 +3,14 @@ from PIL import Image, ImageTk
 import cv2
 from collections import deque
 import warnings
+from src.logger import logger
 
 # Suppress the CustomTkinter warning about using PhotoImage instead of CTkImage
 # We intentionally use PhotoImage to prevent memory leaks in the fast render loop.
 warnings.filterwarnings("ignore", message=".*Given image is not CTkImage.*")
 
 class SmartGestureApp(ctk.CTk):
-    def __init__(self, close_callback):
+    def __init__(self, close_callback=None, toggle_pause_callback=None, set_automation_callback=None):
         super().__init__()
         
         self.title("SmartGestureOS")
@@ -36,6 +37,9 @@ class SmartGestureApp(ctk.CTk):
             pass
         
         self.close_callback = close_callback
+        self.toggle_pause_callback = toggle_pause_callback
+        self.set_automation_callback = set_automation_callback
+        self.automation_enabled = True
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.grid_rowconfigure(0, weight=1)
@@ -152,11 +156,13 @@ class SmartGestureApp(ctk.CTk):
         self.destroy()
         
     def toggle_pause(self):
-        if hasattr(self, 'close_callback') and self.close_callback:
-            # We can trigger it by simulating the hotkey or calling main app method
-            # For simplicity, we just send the hotkey
-            import keyboard
-            keyboard.send('ctrl+alt+g')
+        logger.info("UI Pause/Resume button clicked.")
+        if self.set_automation_callback is not None:
+            self.set_automation_callback(not self.automation_enabled)
+        elif self.toggle_pause_callback is not None:
+            self.toggle_pause_callback()
+        else:
+            logger.warning("No toggle_pause_callback or set_automation_callback configured on UI.")
 
     def open_coach(self):
         from src.ui_coach import CoachUI
@@ -233,12 +239,16 @@ class SmartGestureApp(ctk.CTk):
         else:
             self.camera_state_label.configure(text="● CAMERA DISCONNECTED", text_color="#d64545")
             
+        self.automation_enabled = automation_enabled
         if not automation_enabled:
             self.automation_state_label.configure(text="● AUTOMATION PAUSED", text_color="#d64545")
+            self.pause_btn.configure(text="Resume (Ctrl+Alt+G)", fg_color="#2fa572", hover_color="#26855c")
         elif is_sleeping:
             self.automation_state_label.configure(text="● AUTOMATION SLEEPING", text_color="#d64545")
+            self.pause_btn.configure(text="Pause (Ctrl+Alt+G)", fg_color="#d64545", hover_color="#b33939")
         else:
             self.automation_state_label.configure(text="● AUTOMATION ON", text_color=self.accent_color)
+            self.pause_btn.configure(text="Pause (Ctrl+Alt+G)", fg_color="#d64545", hover_color="#b33939")
 
     def update_frame(self, frame):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

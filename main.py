@@ -40,7 +40,11 @@ class MainApp:
         self.fps_history = collections.deque(maxlen=30)
         self.latency_history: collections.deque = collections.deque(maxlen=30)
 
-        self.ui = SmartGestureApp(close_callback=self.stop_system)
+        self.ui = SmartGestureApp(
+            close_callback=self.stop_system,
+            toggle_pause_callback=self.toggle_automation,
+            set_automation_callback=self.set_automation_enabled,
+        )
 
         # Pipeline state
         self.running: bool = False
@@ -72,7 +76,11 @@ class MainApp:
             self._hotkey_handle = keyboard.add_hotkey(
                 "ctrl+alt+g", self._hotkey_toggle_automation
             )
-            logger.info("Ctrl+Alt+G hotkey registered.")
+            is_listening = getattr(getattr(keyboard, "_listener", None), "listening", False)
+            logger.info(
+                f"Ctrl+Alt+G hotkey registered. Handle={repr(self._hotkey_handle)}, "
+                f"ListenerActive={is_listening}"
+            )
         except Exception as e:
             logger.warning(
                 f"Failed to bind Ctrl+Alt+G hotkey: {e} — "
@@ -91,12 +99,16 @@ class MainApp:
         """
         with self._automation_lock:
             if enabled == self._automation_enabled:
+                logger.debug(f"set_automation_enabled({enabled}) ignored: already {enabled}")
                 return
             self._automation_enabled = enabled
 
+        logger.info(f"set_automation_enabled executing: enabled={enabled}")
         if not enabled:
             # ── Pause: release everything (§6) ────────────────────────────
             self.mapper.mouse.release_all()
+            if hasattr(self.mapper.mouse, "engine"):
+                self.mapper.mouse.engine.reset()
             self.mapper.reset_temporal_state()
             self.classifier.reset()
             self._rearm_state = self._REARM_IDLE
@@ -110,6 +122,7 @@ class MainApp:
 
     def _hotkey_toggle_automation(self) -> None:
         """Called by keyboard library (possibly off main thread)."""
+        logger.info("Hotkey 'Ctrl+Alt+G' callback triggered.")
         with self._automation_lock:
             current = self._automation_enabled
         self.set_automation_enabled(not current)
@@ -135,7 +148,14 @@ class MainApp:
         neutral = stable_gesture in ("Unknown", "None", None, "")
         if neutral:
             self._rearm_neutral_frames += 1
+            logger.debug(
+                f"Re-arm neutral frame count: {self._rearm_neutral_frames}/{self._REARM_NEUTRAL_REQUIRED}"
+            )
         else:
+            if self._rearm_neutral_frames > 0:
+                logger.debug(
+                    f"Re-arm interrupted by gesture '{stable_gesture}' — resetting neutral count."
+                )
             self._rearm_neutral_frames = 0  # reset on non-neutral
 
         if self._rearm_neutral_frames >= self._REARM_NEUTRAL_REQUIRED:
@@ -246,8 +266,8 @@ class MainApp:
             try:
                 import keyboard
                 keyboard.remove_hotkey(self._hotkey_handle)
+                logger.info(f"Ctrl+Alt+G hotkey unregistered. Handle={repr(self._hotkey_handle)}")
                 self._hotkey_handle = None
-                logger.info("Ctrl+Alt+G hotkey unregistered.")
             except Exception as e:
                 logger.warning(f"Could not unregister hotkey: {e}")
 
@@ -300,6 +320,7 @@ class MainApp:
         latest_progress = 0.0
 
         last_result_receive_time = time.perf_counter()
+        last_input_log_time = 0.0
 
         while self.running:
             loop_start = time.perf_counter()
@@ -314,8 +335,13 @@ class MainApp:
                         self.mapper.mouse.release_all()
                         self.mapper.reset_temporal_state()
                         self.classifier.reset()
-                        # Invalidate all queued results (§9)
-                        min_accepted_timestamp_ms = int(time.perf_counter() * 1000)
+                        # Invalidate prior queued results (§9)
+                        min_accepted_timestamp_ms = (
+                            self.detector.last_submitted_timestamp_ms + 1
+                            if hasattr(self.detector, "last_submitted_timestamp_ms")
+                            and self.detector.last_submitted_timestamp_ms > 0
+                            else int(time.perf_counter() * 1000)
+                        )
                         self.detector.clear_results()
                         latest_hands_data = None
                         latest_stable_gesture = "Unknown"
@@ -374,28 +400,32 @@ class MainApp:
                         self.detector.detect_async(small_frame, timestamp_ms)
                         last_inference_time = current_time
 
-                    # 2. Consume latest ML result (drain to newest); apply TTL (§9)
+                    # 2. Consume latest ML result (drain queue, keep newest valid; apply TTL (§9))
                     result_ts, results = None, None
                     while not self.detector.results_queue.empty():
-                        result_ts, results = self.detector.results_queue.get_nowait()
+                        try:
+                            q_ts, q_res = self.detector.results_queue.get_nowait()
+                            if q_ts >= min_accepted_timestamp_ms:
+                                result_ts, results = q_ts, q_res
+                            else:
+                                logger.debug(
+                                    f"Discarding stale result {q_ts} < {min_accepted_timestamp_ms}"
+                                )
+                        except queue.Empty:
+                            break
 
                     if result_ts is not None:
-                        # Reject stale/pre-reset results (§9)
-                        if result_ts < min_accepted_timestamp_ms:
-                            result_ts = None
-                            results = None
-                        else:
-                            last_result_receive_time = current_time
-                            latency_ms = int(time.perf_counter() * 1000) - result_ts
-                            self.latency_history.append(latency_ms)
+                        last_result_receive_time = current_time
+                        latency_ms = int(time.perf_counter() * 1000) - result_ts
+                        self.latency_history.append(latency_ms)
 
-                            latest_hands_data = self.detector.get_all_hands_data(
-                                results, frame.shape
-                            )
-                            result_obj = self.classifier.classify(latest_hands_data)
-                            latest_stable_gesture = result_obj.gesture
-                            latest_raw_gesture    = result_obj.raw_gesture
-                            latest_confidence     = int(result_obj.confidence)
+                        latest_hands_data = self.detector.get_all_hands_data(
+                            results, frame.shape
+                        )
+                        result_obj = self.classifier.classify(latest_hands_data)
+                        latest_stable_gesture = result_obj.gesture
+                        latest_raw_gesture    = result_obj.raw_gesture
+                        latest_confidence     = int(result_obj.confidence)
 
                     if result_ts is None and current_time - last_result_receive_time > 0.25:
                         # Stale ML TTL — clear and reset (§9)
@@ -404,7 +434,7 @@ class MainApp:
                             self.mapper.mouse.release_all()
                             self.mapper.reset_temporal_state()
                             self.classifier.reset()
-                            min_accepted_timestamp_ms = int(current_time * 1000)
+                            self.detector.clear_results()
                         latest_hands_data = None
                         latest_stable_gesture = "Unknown"
                         latest_raw_gesture    = "Unknown"
@@ -412,6 +442,19 @@ class MainApp:
 
                     # 3. Apply mapper using current ML result
                     display_frame = frame.copy()
+
+                    # Report detector availability clearly (Phase B)
+                    if not self.detector.available:
+                        cv2.putText(
+                            display_frame,
+                            f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
+                            (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2,
+                        )
+
+                    # Draw landmarks whenever hand data exists (Phase G)
+                    if latest_hands_data:
+                        for hand_data in latest_hands_data:
+                            self.detector.draw_landmarks(display_frame, hand_data["landmarks"])
 
                     if not self.automation_enabled:
                         cv2.putText(
@@ -431,16 +474,6 @@ class MainApp:
                         latest_progress = 0.0
 
                     elif latest_hands_data:
-                        # Draw landmark dots
-                        for hand_data in latest_hands_data:
-                            h1 = hand_data["landmarks"]
-                            for i in range(21):
-                                cv2.circle(
-                                    display_frame,
-                                    (h1[i].pixel_x, h1[i].pixel_y),
-                                    2, (0, 0, 255), -1,
-                                )
-
                         display_frame, latest_action, latest_progress = self.mapper.process(
                             latest_hands_data, latest_stable_gesture,
                             latest_raw_gesture, display_frame,
@@ -453,6 +486,22 @@ class MainApp:
                         display_frame, latest_action, latest_progress = self.mapper.process(
                             [], "None", "None", display_frame
                         )
+
+                    # Rate-limited input pipeline diagnostics (every 1.0s)
+                    if latest_hands_data and current_time - last_input_log_time >= 1.0:
+                        h1 = latest_hands_data[0]["landmarks"]
+                        engine_state = (
+                            self.mapper.mouse.engine.state.name
+                            if hasattr(self.mapper, "mouse") and hasattr(self.mapper.mouse, "engine")
+                            else "N/A"
+                        )
+                        logger.debug(
+                            f"InputPipeline: raw='{latest_raw_gesture}', "
+                            f"stable='{latest_stable_gesture}', conf={latest_confidence}%, "
+                            f"engine_state={engine_state}, action='{latest_action}', "
+                            f"index_tip=({h1[8].pixel_x}, {h1[8].pixel_y})"
+                        )
+                        last_input_log_time = current_time
 
                     # Telemetry
                     time_diff = time.perf_counter() - loop_start

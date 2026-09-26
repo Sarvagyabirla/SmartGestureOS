@@ -52,7 +52,7 @@ class EventEngine:
         self._right_click_armed = True  # True = ready to fire right-click
 
         # Configuration (updated by settings callback in MouseController)
-        self.double_click_window_ms = 300 / 1000.0
+        self.double_click_window_ms = 220 / 1000.0  # Crisp double-click window
         self.drag_hold_ms = 350 / 1000.0
         self.cooldown_duration = 150 / 1000.0
 
@@ -61,17 +61,26 @@ class EventEngine:
             self.state = new_state
             self.last_state_change = time.perf_counter()
 
+    def reset(self) -> None:
+        """
+        Failsafe reset of all temporal state, timers, scroll accumulator,
+        and releases all active mouse events.
+        """
+        self.pinch_down_time = 0.0
+        self.pinch_release_time = 0.0
+        self.scroll_start_y = None
+        self.scroll_accumulator = 0.0
+        self._right_click_armed = True
+        self.mouse.mouse.release_all()
+        self._change_state(EventState.HAND_LOST)
+
     def on_hand_lost(self) -> None:
         """
         Mandatory safety failsafe.
         Call this whenever hand tracking, camera, or ML pipeline is unavailable.
         Releases all held mouse buttons and resets automation state.
         """
-        self.mouse.mouse.drag(start=False)   # releases left button if dragging
-        self.scroll_start_y = None
-        self.scroll_accumulator = 0.0
-        self._right_click_armed = True       # re-arm on re-acquisition
-        self._change_state(EventState.HAND_LOST)
+        self.reset()
 
     def process(
         self,
@@ -88,46 +97,48 @@ class EventEngine:
 
         # ── Re-acquire from HAND_LOST ──────────────────────────────────────────
         if self.state == EventState.HAND_LOST:
-            if (
-                lms_list
-                and len(lms_list) > 0
-                and stable_gesture not in ("None", "Unknown")
-            ):
+            if lms_list and len(lms_list) >= 21:
                 self._change_state(EventState.HOVER)
             else:
                 return  # Still lost; do nothing
 
         # ── Continuous mouse movement (non-blocking) ───────────────────────────
-        if raw_gesture in (
-            "Pointing", "Pinch", "Three Fingers",
-            "Victory", "Two Fingers", "Closed Fist",
-        ):
-            self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
+        # Move cursor for navigation gestures whenever not actively scrolling
+        if self.state != EventState.SCROLLING:
+            if raw_gesture in (
+                "Pointing", "Pinch", "Three Fingers",
+                "Victory", "Two Fingers", "Closed Fist",
+            ) or stable_gesture in (
+                "Pointing", "Pinch", "Three Fingers",
+                "Victory", "Two Fingers", "Closed Fist",
+            ):
+                self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
 
         # ── F-06 FIX: right-click release gate ────────────────────────────────
         # Re-arm right-click only after Three Fingers gesture is released
-        if stable_gesture != "Three Fingers":
+        if stable_gesture != "Three Fingers" and raw_gesture != "Three Fingers":
             self._right_click_armed = True
 
         # ── State transitions ──────────────────────────────────────────────────
         if self.state == EventState.HOVER:
-            if stable_gesture == "Pinch":
+            if stable_gesture == "Pinch" or raw_gesture == "Pinch":
                 self.pinch_down_time = now
                 self._change_state(EventState.PINCH_DOWN)
 
-            elif stable_gesture == "Two Fingers":
+            elif stable_gesture == "Two Fingers" or raw_gesture == "Two Fingers":
                 self.scroll_start_y = lms_list[8].y if lms_list else None
                 self.scroll_accumulator = 0.0
                 self._change_state(EventState.SCROLLING)
 
-            elif stable_gesture == "Three Fingers" and self._right_click_armed:
+            elif (stable_gesture == "Three Fingers" or raw_gesture == "Three Fingers") and self._right_click_armed:
                 # F-06 FIX: fire once, then require release before re-arming
                 self.mouse.mouse.click(button="right")
                 self._right_click_armed = False
                 self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.PINCH_DOWN:
-            if stable_gesture != "Pinch":
+            is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
+            if not is_pinching:
                 # Pinch released
                 hold_duration = now - self.pinch_down_time
                 if hold_duration < self.drag_hold_ms:
@@ -135,7 +146,7 @@ class EventEngine:
                     self.pinch_release_time = now
                     self._change_state(EventState.PINCH_RELEASE_WAIT)
                 else:
-                    # Was dragging (but somehow missed DRAGGING state) — release
+                    # Was dragging (or hold elapsed) — release
                     self.mouse.mouse.drag(start=False)
                     self._change_state(EventState.COOLDOWN)
             else:
@@ -145,7 +156,8 @@ class EventEngine:
                     self._change_state(EventState.DRAGGING)
 
         elif self.state == EventState.PINCH_RELEASE_WAIT:
-            if stable_gesture == "Pinch":
+            is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
+            if is_pinching:
                 # Second pinch within double-click window
                 self.mouse.mouse.double_click()
                 self._change_state(EventState.COOLDOWN)
@@ -155,12 +167,14 @@ class EventEngine:
                 self._change_state(EventState.HOVER)
 
         elif self.state == EventState.DRAGGING:
-            if stable_gesture != "Pinch":
+            is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
+            if not is_pinching:
                 self.mouse.mouse.drag(start=False)
                 self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.SCROLLING:
-            if stable_gesture != "Two Fingers":
+            is_scrolling = (stable_gesture == "Two Fingers" or raw_gesture == "Two Fingers")
+            if not is_scrolling:
                 self.scroll_start_y = None
                 self.scroll_accumulator = 0.0
                 self._change_state(EventState.HOVER)
