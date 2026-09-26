@@ -19,21 +19,26 @@ def main():
     print("and evaluates gesture recognition stability.")
     print("Press 'q' to quit.")
 
-    camera = Camera(index=0, width=640, height=480, fps=30)
-    detector = GestureDetector()
-    classifier = GestureClassifier()
-
-    if not camera.start():
-        print("Failed to start camera.")
-        return
-
     FOCAL_LENGTH_PX = 600  # Approximated typical webcam focal length
     REAL_WRIST_MCP_CM = 10.0 # Typical adult hand size from wrist to middle finger MCP
 
-    # We will log data every 1 second
-    last_log_time = time.time()
+    # Log at most twice per second using the same monotonic clock as inference.
+    last_log_time = time.perf_counter()
+    camera = None
+    detector = None
 
     try:
+        camera = Camera(index=0, width=640, height=480, fps=30)
+        detector = GestureDetector()
+        classifier = GestureClassifier()
+
+        if not detector.available:
+            print(f"Hand tracking unavailable: {detector.error}")
+            return
+        if not camera.start():
+            print("Failed to start camera.")
+            return
+
         while True:
             frame, _ = camera.read()
             if frame is None:
@@ -41,15 +46,8 @@ def main():
                 continue
 
             # Synchronous detection for benchmark to ensure 1:1 frame-result mapping
-            timestamp_ms = int(time.time() * 1000)
-            detector.detect_async(frame, timestamp_ms)
-
-            # Wait briefly for result in queue since benchmark is synchronous-ish
-            try:
-                import queue
-                result_ts, results = detector.results_queue.get(timeout=0.1)
-            except queue.Empty:
-                results = None
+            timestamp_ms = int(time.perf_counter() * 1000)
+            results = detector.process_frame(frame, timestamp_ms)
 
             hands_data = detector.get_all_hands_data(results, frame.shape)
 
@@ -62,7 +60,7 @@ def main():
                 lms = h1['landmarks']
 
                 # Draw
-                detector.draw_landmarks(frame, results.hand_landmarks[0])
+                detector.draw_landmarks(frame, lms)
 
                 # Estimate distance
                 # Wrist is 0, Middle Finger MCP is 9
@@ -73,20 +71,22 @@ def main():
                 if pixel_size > 0:
                     distance_cm = (REAL_WRIST_MCP_CM * FOCAL_LENGTH_PX) / pixel_size
 
-                stable, raw, confidence = classifier.classify(hands_data)
-                gesture = raw
+                gesture_result = classifier.classify(hands_data)
+                confidence = int(gesture_result.confidence)
+                gesture = gesture_result.raw_gesture
 
                 cv2.putText(frame, f"Dist: {distance_cm:.1f} cm", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                 cv2.putText(frame, f"Gesture: {gesture} ({confidence}%)", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-                if time.time() - last_log_time >= 0.5:
+                if time.perf_counter() - last_log_time >= 0.5:
                     print(f"Distance: {distance_cm:5.1f} cm | Gesture: {gesture:15} | Confidence: {confidence:3}% | PixelSize: {pixel_size:.1f}px")
-                    last_log_time = time.time()
+                    last_log_time = time.perf_counter()
             else:
+                classifier.reset()
                 cv2.putText(frame, "No Hand Detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                if time.time() - last_log_time >= 0.5:
+                if time.perf_counter() - last_log_time >= 0.5:
                     print(f"Distance:  ---- cm | Gesture: None            | Confidence:   0% | PixelSize: ----px")
-                    last_log_time = time.time()
+                    last_log_time = time.perf_counter()
 
             cv2.imshow("Distance Benchmark", frame)
 
@@ -96,8 +96,15 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        camera.stop()
-        cv2.destroyAllWindows()
+        try:
+            if camera is not None:
+                camera.stop()
+        finally:
+            try:
+                if detector is not None:
+                    detector.close()
+            finally:
+                cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()

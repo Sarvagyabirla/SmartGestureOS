@@ -1,20 +1,13 @@
-"""
-Regression tests for Hand Landmark Pipeline (§Phase I):
-- detector available and telemetry
-- strictly increasing timestamps
-- stale reset does not reject future results
-- callback queue consumption
-- hand result survives pipeline
-"""
+"""Regression checks for the production synchronous VIDEO hand pipeline."""
 
-import time
-import queue
+from dataclasses import dataclass
+from threading import Event, Thread
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
-from dataclasses import dataclass
 
-from src.gesture_detector import GestureDetector
+from src.gesture_detector import GestureDetector, vision
 from src.models import Landmark
 
 
@@ -29,152 +22,210 @@ class MockNormalizedLandmark:
 class MockHandLandmarkerResult:
     hand_landmarks: list
     handedness: list
-    hand_world_landmarks: list = None
+    hand_world_landmarks: list | None = None
+
+
+@pytest.fixture
+def detector_and_backend():
+    backend = MagicMock()
+    backend.detect_for_video.return_value = MockHandLandmarkerResult([], [])
+    with patch(
+        "src.gesture_detector.vision.HandLandmarker.create_from_options",
+        return_value=backend,
+    ) as create:
+        detector = GestureDetector()
+    yield detector, backend, create
+    detector.close()
 
 
 class TestHandPipelineRegression:
-    def test_detector_available_and_telemetry(self):
-        """Phase I: Verify detector initialization attributes and telemetry counters."""
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_create.return_value = MagicMock()
-            det = GestureDetector()
+    def test_detector_initializes_video_without_callback(self, detector_and_backend):
+        detector, _, create = detector_and_backend
+        options = create.call_args.args[0]
 
-        assert det.available is True
-        assert det.error is None
-        assert det.frames_submitted == 0
-        assert det.callbacks_received == 0
-        assert det.hands_detected_count == 0
-        assert det.last_submitted_timestamp_ms == -1
+        assert options.running_mode == vision.RunningMode.VIDEO
+        assert options.result_callback is None
+        assert detector.available is True
+        assert detector.error is None
+        assert detector.frames_processed == 0
+        assert detector.frames_with_hands == 0
+        assert detector.last_submitted_timestamp_ms == -1
 
-    def test_detector_increasing_timestamps(self):
-        """Phase I: Verify detect_async enforces strictly increasing timestamps."""
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_inst = MagicMock()
-            mock_create.return_value = mock_inst
-            det = GestureDetector()
+    def test_initialization_failure_is_reported_without_crashing(self):
+        with patch(
+            "src.gesture_detector.vision.HandLandmarker.create_from_options",
+            side_effect=RuntimeError("model initialization failed"),
+        ):
+            detector = GestureDetector()
 
-        dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
+        assert detector.available is False
+        assert "model initialization failed" in detector.error
+        assert detector.process_frame(np.zeros((2, 2, 3), dtype=np.uint8), 1000) is None
+        detector.close()
 
-        # Call with identical or non-increasing timestamps
-        det.detect_async(dummy_img, 1000)
-        det.detect_async(dummy_img, 1000)
-        det.detect_async(dummy_img, 999)
+    def test_results_are_returned_directly_and_hand_loss_is_fresh(self, detector_and_backend):
+        detector, backend, _ = detector_and_backend
+        hand = [MockNormalizedLandmark(0.5, 0.5, 0.0) for _ in range(21)]
+        with_hand = MockHandLandmarkerResult([hand], [])
+        no_hand = MockHandLandmarkerResult([], [])
+        backend.detect_for_video.side_effect = [with_hand, no_hand]
+        frame = np.zeros((2, 2, 3), dtype=np.uint8)
 
-        # The internal timestamps must be strictly increasing
-        calls = mock_inst.detect_for_video.call_args_list
-        assert len(calls) == 3
-        ts0 = calls[0][0][1]
-        ts1 = calls[1][0][1]
-        ts2 = calls[2][0][1]
+        assert detector.process_frame(frame, 1000) is with_hand
+        assert detector.process_frame(frame, 1001) is no_hand
+        assert detector.get_all_hands_data(no_hand, frame.shape) == []
+        assert detector.frames_processed == 2
+        assert detector.frames_with_hands == 1
+        assert detector.last_detection_timestamp == 1001
 
-        assert ts0 == 1000
-        assert ts1 == 1001
-        assert ts2 == 1002
-        assert det.frames_submitted == 3
+    def test_timestamps_increase_after_duplicates_reversal_and_rejected_input(
+        self, detector_and_backend
+    ):
+        detector, backend, _ = detector_and_backend
+        frame = np.zeros((2, 2, 3), dtype=np.uint8)
 
-    def test_process_frame_rejects_invalid_image_without_raising(self):
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_create.return_value = MagicMock()
-            det = GestureDetector()
+        detector.process_frame(frame, 1000)
+        detector.process_frame(frame, 1000)
+        detector.process_frame(frame, 999)
+        assert detector.process_frame(None, 1005) is None
+        detector.process_frame(frame, 1000)
 
-        assert det.process_frame(None, 1000) is None
-        assert det.frames_processed == 0
+        assert [call.args[1] for call in backend.detect_for_video.call_args_list] == [
+            1000, 1001, 1002, 1006
+        ]
+        assert detector.frames_processed == 4
 
-    def test_stale_reset_does_not_reject_future_results(self):
-        """Phase I: Verify stale reset does not reject future valid callbacks."""
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_create.return_value = MagicMock()
-            det = GestureDetector()
+    def test_bgr_frame_is_converted_to_rgb_without_changing_input(self, detector_and_backend):
+        detector, backend, _ = detector_and_backend
+        bgr = np.array([[[10, 20, 30], [40, 50, 60]]], dtype=np.uint8)
+        original = bgr.copy()
 
-        # Simulate prior submitted frame at ts=5000
-        det.last_submitted_timestamp_ms = 5000
+        detector.process_frame(bgr, 1000)
 
-        # Disconnect / reset happens: min_accepted_timestamp_ms is set
-        min_accepted = det.last_submitted_timestamp_ms + 1
-        det.clear_results()
-
-        # An old in-flight callback arrives from ts=4900
-        old_res = MockHandLandmarkerResult(hand_landmarks=[], handedness=[])
-        det._result_callback(old_res, None, 4900)
-
-        # Future callback arrives from ts=5001
-        future_res = MockHandLandmarkerResult(hand_landmarks=[[MockNormalizedLandmark(0.5, 0.5, 0.0)] * 21], handedness=[])
-        det._result_callback(future_res, None, 5001)
-
-        # Main loop draining simulation
-        accepted_results = []
-        while not det.results_queue.empty():
-            ts, res = det.results_queue.get_nowait()
-            if ts >= min_accepted:
-                accepted_results.append((ts, res))
-
-        # Old result rejected, future result accepted
-        assert len(accepted_results) == 1
-        assert accepted_results[0][0] == 5001
-
-    def test_callback_queue_consumption(self):
-        """Phase I: Verify results_queue safely handles put/get without deadlock."""
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_create.return_value = MagicMock()
-            det = GestureDetector()
-
-        # Queue maxsize is 2. Push 3 items — oldest should be dropped without exception
-        res1 = MockHandLandmarkerResult(hand_landmarks=[], handedness=[])
-        res2 = MockHandLandmarkerResult(hand_landmarks=[], handedness=[])
-        res3 = MockHandLandmarkerResult(hand_landmarks=[], handedness=[])
-
-        det._result_callback(res1, None, 100)
-        det._result_callback(res2, None, 200)
-        det._result_callback(res3, None, 300)
-
-        assert det.callbacks_received == 3
-        # Should contain newest two: 200 and 300
-        items = []
-        while not det.results_queue.empty():
-            items.append(det.results_queue.get_nowait())
-
-        assert len(items) == 2
-        assert items[0][0] == 200
-        assert items[1][0] == 300
-
-    def test_hand_result_survives_pipeline(self):
-        """Phase I: Verify hand result is converted to 21 landmarks and drawn on display_frame."""
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_create.return_value = MagicMock()
-            det = GestureDetector()
-
-        # 21 mock landmarks
-        raw_lms = [MockNormalizedLandmark(x=i * 0.04, y=i * 0.04, z=0.0) for i in range(21)]
-        res = MockHandLandmarkerResult(
-            hand_landmarks=[raw_lms],
-            handedness=[[MagicMock(score=0.95)]],
+        image = backend.detect_for_video.call_args.args[0]
+        np.testing.assert_array_equal(
+            image.numpy_view(), np.array([[[30, 20, 10], [60, 50, 40]]], dtype=np.uint8)
         )
+        np.testing.assert_array_equal(bgr, original)
 
-        hands_data = det.get_all_hands_data(res, (720, 1280, 3))
-        assert len(hands_data) == 1
-        assert len(hands_data[0]["landmarks"]) == 21
-        assert hands_data[0]["score"] == 95
+    @pytest.mark.parametrize(
+        "frame",
+        [None, np.zeros((2, 2), dtype=np.uint8), np.zeros((2, 2, 4), dtype=np.uint8)],
+        ids=["missing", "grayscale", "four_channels"],
+    )
+    def test_invalid_input_is_rejected_before_inference(self, detector_and_backend, frame):
+        detector, backend, _ = detector_and_backend
 
-        # Test landmark drawing onto frame
-        test_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
-        det.draw_landmarks(test_frame, hands_data[0]["landmarks"])
+        assert detector.process_frame(frame, 1000) is None
+        backend.detect_for_video.assert_not_called()
+        assert detector.frames_processed == 0
 
-        # Pixels must be modified (colored lines and circles drawn)
-        assert test_frame.sum() > 0
+    def test_inference_failure_returns_none_then_next_frame_recovers(self, detector_and_backend):
+        detector, backend, _ = detector_and_backend
+        recovered_result = MockHandLandmarkerResult([], [])
+        backend.detect_for_video.side_effect = [RuntimeError("transient failure"), recovered_result]
+        frame = np.zeros((2, 2, 3), dtype=np.uint8)
 
-    def test_detected_hand_landmarks_cycle_through_rgb_colors(self):
-        with patch("src.gesture_detector.vision.HandLandmarker.create_from_options") as mock_create:
-            mock_create.return_value = MagicMock()
-            det = GestureDetector()
+        assert detector.process_frame(frame, 1000) is None
+        assert detector.frames_processed == 0
+        assert detector.process_frame(frame, 1000) is recovered_result
+        assert detector.frames_processed == 1
+        assert backend.detect_for_video.call_args.args[1] == 1001
 
-        landmarks = [Landmark(id=i, pixel_x=32, pixel_y=32, x=0.5, y=0.5, z=0.0) for i in range(21)]
-        red_frame = np.zeros((64, 64, 3), dtype=np.uint8)
-        green_frame = np.zeros_like(red_frame)
+    def test_close_is_idempotent_and_prevents_later_inference(self, detector_and_backend):
+        detector, backend, _ = detector_and_backend
 
-        det.draw_landmarks(red_frame, landmarks, color_phase=0.0)
-        det.draw_landmarks(green_frame, landmarks, color_phase=1.0 / 3.0)
+        detector.close()
+        detector.close()
 
-        red_ring = red_frame[32, 36]
-        green_ring = green_frame[32, 36]
-        assert tuple(red_ring) == (0, 0, 255)
-        assert tuple(green_ring) == (0, 255, 0)
+        assert detector.available is False
+        backend.close.assert_called_once_with()
+        assert detector.process_frame(np.zeros((2, 2, 3), dtype=np.uint8), 1000) is None
+        backend.detect_for_video.assert_not_called()
+
+    def test_close_waits_for_inflight_frame_before_releasing_backend(self, detector_and_backend):
+        detector, backend, _ = detector_and_backend
+        inference_started = Event()
+        finish_inference = Event()
+        close_requested = Event()
+        backend_closed = Event()
+        result = MockHandLandmarkerResult([], [])
+        returned_results = []
+
+        def infer(image, timestamp):
+            inference_started.set()
+            if not finish_inference.wait(timeout=2.0):
+                raise TimeoutError("test did not release inference")
+            return result
+
+        def close():
+            close_requested.set()
+            detector.close()
+
+        backend.detect_for_video.side_effect = infer
+        backend.close.side_effect = backend_closed.set
+        frame = np.zeros((2, 2, 3), dtype=np.uint8)
+        worker = Thread(target=lambda: returned_results.append(detector.process_frame(frame, 1000)))
+        closer = Thread(target=close)
+        worker.start()
+        try:
+            assert inference_started.wait(timeout=1.0)
+            closer.start()
+            assert close_requested.wait(timeout=1.0)
+            assert not backend_closed.wait(timeout=0.05)
+        finally:
+            finish_inference.set()
+            worker.join(timeout=2.0)
+            if closer.ident is not None:
+                closer.join(timeout=2.0)
+
+        assert not worker.is_alive()
+        assert not closer.is_alive()
+        assert returned_results == [result]
+        assert backend_closed.is_set()
+        assert detector.available is False
+
+    def test_hand_result_survives_inference_conversion_and_drawing(self, detector_and_backend):
+        detector, backend, _ = detector_and_backend
+        raw = [MockNormalizedLandmark(i * 0.04, i * 0.04, -0.01) for i in range(21)]
+        world = [MockNormalizedLandmark(i * 0.01, i * 0.02, -0.03) for i in range(21)]
+        backend.detect_for_video.return_value = MockHandLandmarkerResult(
+            hand_landmarks=[raw],
+            handedness=[[MagicMock(score=0.95)]],
+            hand_world_landmarks=[world],
+        )
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+        result = detector.process_frame(frame, 1000)
+        hands = detector.get_all_hands_data(result, frame.shape)
+
+        assert len(hands) == 1
+        assert len(hands[0]["landmarks"]) == 21
+        assert hands[0]["score"] == 95
+        fingertip = hands[0]["landmarks"][20]
+        assert fingertip.id == 20
+        assert (fingertip.pixel_x, fingertip.pixel_y) == (1024, 576)
+        assert (fingertip.world_x, fingertip.world_y, fingertip.world_z) == (0.2, 0.4, -0.03)
+
+        detector.draw_landmarks(frame, hands[0]["landmarks"], color_phase=0.0)
+        assert frame.sum() > 0
+
+    @pytest.mark.parametrize(
+        ("phase", "bgr"),
+        [(0.0, (0, 0, 255)), (1.0 / 3.0, (0, 255, 0)), (2.0 / 3.0, (255, 0, 0))],
+        ids=["red", "green", "blue"],
+    )
+    def test_detected_hand_landmarks_cycle_through_rgb_colors(
+        self, detector_and_backend, phase, bgr
+    ):
+        detector, _, _ = detector_and_backend
+        landmarks = [
+            Landmark(id=i, pixel_x=32, pixel_y=32, x=0.5, y=0.5, z=0.0)
+            for i in range(21)
+        ]
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        detector.draw_landmarks(frame, landmarks, color_phase=phase)
+
+        assert tuple(frame[32, 36]) == bgr
+        assert tuple(frame[32, 32]) == (255, 255, 255)

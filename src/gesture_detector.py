@@ -2,11 +2,9 @@ import cv2
 import mediapipe as mp
 import time
 import threading
-import queue
 import colorsys
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from dataclasses import dataclass
 from .logger import logger
 
 from .models import Landmark
@@ -14,7 +12,6 @@ from .models import Landmark
 
 class GestureDetector:
     def __init__(self, max_hands=1, detection_con=0.5, tracking_con=0.5):
-        self.results_queue = queue.Queue(maxsize=2)
         self.lock = threading.Lock()
         
         # Telemetry for VIDEO mode
@@ -27,10 +24,6 @@ class GestureDetector:
         self.average_inference_latency: float = 0.0
         self._latency_samples: list[float] = []
 
-        # Legacy callback counters preserved for test assertions
-        self.callbacks_received: int = 0
-        self.latest_callback_timestamp_ms: int = -1
-        self.last_callback_landmarks_count: int = 0
         self.last_log_time: float = time.perf_counter()
         
         try:
@@ -72,19 +65,12 @@ class GestureDetector:
     def detector_error(self) -> str | None:
         return self.error
 
-    def clear_results(self) -> None:
-        """Drain all queued results to invalidate pre-reset callbacks (§9)."""
-        drained = 0
-        while not self.results_queue.empty():
-            try:
-                self.results_queue.get_nowait()
-                drained += 1
-            except queue.Empty:
-                break
-        if drained:
-            logger.debug(f"GestureDetector: cleared {drained} stale result(s).")
-
     def process_frame(self, img, timestamp_ms: int):
+        # Serialize inference and close: native tasks must not be freed while used.
+        with self.lock:
+            return self._process_frame(img, timestamp_ms)
+
+    def _process_frame(self, img, timestamp_ms: int):
         """
         Synchronous VIDEO-mode frame inference.
         Guarantees strictly increasing timestamps, executes detect_for_video,
@@ -143,48 +129,6 @@ class GestureDetector:
         """Alias for process_frame."""
         return self.process_frame(img, timestamp_ms)
 
-    def detect_async(self, img, timestamp_ms: int):
-        """
-        Legacy wrapper executing process_frame and pushing to results_queue
-        for backward compatibility with older tests and callers.
-        """
-        result = self.process_frame(img, timestamp_ms)
-        if result is not None:
-            self.callbacks_received += 1
-            if self.results_queue.full():
-                try:
-                    self.results_queue.get_nowait()
-                except queue.Empty:
-                    pass
-            try:
-                self.results_queue.put_nowait((self.last_submitted_timestamp_ms, result))
-            except queue.Full:
-                pass
-        return result
-
-    def _result_callback(self, result: vision.HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
-        """Legacy callback handler preserved for mock test suites."""
-        try:
-            self.callbacks_received += 1
-            self.latest_callback_timestamp_ms = timestamp_ms
-            num_hands = len(result.hand_landmarks) if result and result.hand_landmarks else 0
-            self.last_callback_landmarks_count = num_hands
-            if num_hands > 0:
-                self.hands_detected_count += 1
-                self.frames_with_hands += 1
-
-            if self.results_queue.full():
-                try:
-                    self.results_queue.get_nowait()
-                except queue.Empty:
-                    pass
-            try:
-                self.results_queue.put_nowait((timestamp_ms, result))
-            except queue.Full:
-                pass
-        except Exception as e:
-            logger.error(f"Error in result callback: {e}")
-            
     def draw_landmarks(self, img, landmarks, color_phase: float | None = None):
         """Draw landmarks with an animated RGB hue (input colors are OpenCV BGR)."""
         h, w, _ = img.shape
@@ -257,8 +201,11 @@ class GestureDetector:
         return hands_data
         
     def close(self):
-        if self.detector:
-            try:
-                self.detector.close()
-            except Exception as e:
-                logger.error(f"Error closing detector: {e}")
+        with self.lock:
+            detector, self.detector = self.detector, None
+            self.available = False
+            if detector is not None:
+                try:
+                    detector.close()
+                except Exception as e:
+                    logger.error(f"Error closing detector: {e}")

@@ -159,8 +159,10 @@ class GestureMapper:
         """
         self.timer.reset()
         self.sleep_timer.reset()
+        self.last_pinch_time = 0.0
         self.brightness_gesture_active = False
         self.last_brightness_y = None
+        self.canvas.end_stroke()
         if hasattr(self.mouse, "engine"):
             self.mouse.engine.reset()
 
@@ -255,8 +257,8 @@ class GestureMapper:
         gesture = stable_gesture
 
         if not hands_data:
-            self.mouse.engine.on_hand_lost()
-            return frame, action, progress
+            self.reset_temporal_state()
+            return frame, action, 0.0
 
         h1 = hands_data[0]["landmarks"]
         index_x, index_y = h1[8].pixel_x, h1[8].pixel_y
