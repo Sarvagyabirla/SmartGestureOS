@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Documentation
+- 2026-09-27: Updated privacy, security, support and website language using
+  MediaPipe's published notice that Tasks APIs send performance and usage
+  metrics to Google while processing input images on device.
 - 2026-09-27: Corrected profile storage paths, team attribution, support routes,
   Trainer controls, VIDEO detector architecture, and pinned dependency notices.
 - 2026-09-27: Disclosed observed MediaPipe 0.10.35 native Clearcut uploader
@@ -17,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   successful transmission status are unknown. Dependency behavior remains
   unresolved and prevents a verified zero-telemetry/no-network claim. See
   [PRIVACY.md](PRIVACY.md).
+
+### Reliability and release validation
+- Reject invalid camera frames and recover from driver open-state, mirror and
+  release exceptions without losing the capture thread.
+- Require raw/stable agreement before starting a pinch action; wait for the
+  second pinch to release before deciding double click versus drag.
+- Add a camera-free `--self-check` path for model loading and native VIDEO
+  inference, and require it to pass in Windows build/release workflows.
+- Correct the PyInstaller MediaPipe dependency exclusion and build-script path
+  handling. Release workflow now creates a draft pending installer validation.
 
 ### Security
 - F-07: Replaced `shell=True` subprocess launches with `shell=False` + explicit exe paths in `ShortcutController`. Chrome and VS Code paths now located via `shutil.which` + known env-var paths. `lock_pc` uses `ctypes.windll.user32.LockWorkStation()` directly.

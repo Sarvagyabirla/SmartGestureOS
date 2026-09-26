@@ -13,9 +13,10 @@ implementation and automated tests. No release or Store publication is claimed.
 | Fetched `origin/main` | `fb70efcee0b30204f06ca3fff0d6d7477fff6ad8` |
 | Fresh baseline | Python 3.11.9; **223 passed in 6.65 s** |
 | After runtime fixes | **346 passed in 7.08 s**; compileall and pip check passed |
+| New master-spec pass | Started clean at local/remote `48b7c2f`; fresh baseline **346 passed**; after fixes **356 passed in 6.79 s** |
 | Detector | MediaPipe VIDEO, one newest camera frame, worker inference |
 | Camera and landmarks | Actual camera 0 returned a moving 21-point hand in the guided run |
-| Cursor/click/drag/scroll/right-click | Automated regressions pass; physical acceptance remains NOT TESTED |
+| Core mouse | Cursor movement confirmed by the user with a real hand; click, double-click, drag/drop, scroll and right-click physical results pending |
 | Pause | Automated release/re-arm tests pass; live guide resumed, armed, paused and shut down |
 | DRAW | History, resize and gesture-release defects fixed in code; physical drawing pending |
 | Media/audio | Action results and holds fixed; real audio endpoint read succeeded; gesture-driven audio pending |
@@ -37,10 +38,10 @@ Remote evidence: [main CI](https://github.com/Sarvagyabirla/SmartGestureOS/actio
 | Step | Status | Acceptance still needed |
 |---|---|---|
 | 1 — Working hand tracking | DONE | Prior physical evidence retained; current run reconfirms camera and 21 landmarks |
-| 2 — Core input control | PARTIAL | Explicit hand-only cursor, click, double-click, drag/drop, both scroll directions and right-click results |
+| 2 — Core input control | PARTIAL | Cursor observed; single/double click, drag/drop, both scroll directions and right-click results pending |
 | 3 — Complete feature set | PARTIAL | Source fixes and tests below; physical GENERAL/MEDIA/DRAW, system actions, pause/resume |
 | 4 — Stability | PARTIAL | Configuration recovery hardened; 20–30 minute interaction/reconnect session pending |
-| 5 — Standalone EXE | NOT STARTED | Correct dependency exclusion, rebuild, then startup and physical checks |
+| 5 — Standalone EXE | NOT STARTED | Spec exclusion corrected and frozen self-check prepared; rebuild, launch and physical checks still required |
 | 6 — Installer | NOT STARTED | Current installer and install/restart/uninstall/reinstall validation |
 | 7 — GitHub Release | NOT STARTED | Validated v0.9.0 installer, checksum and public download |
 | 8 — GitHub Pages | NOT STARTED | Accurate site, enabled deployment and verified public links |
@@ -67,8 +68,12 @@ no button/wheel receipts, and all six human observations `not_recorded`**.
 Those motion receipts also include physical mouse movement and do not prove
 gesture-driven cursor operation. No webcam images were saved.
 
-**Manual action required:** report what happened during the cursor attempt,
-then complete the [guided physical check](MOUSE_HARDWARE_CHECK.md):
+In response to a new single-test prompt, the user explicitly confirmed that
+the cursor followed the hand inside the guided area while the physical mouse
+stayed still. This confirms cursor movement only. No new saved guide report was
+found for that answer. The single-click check is now pending; later mouse
+interactions remain unverified. The [guided physical check](MOUSE_HARDWARE_CHECK.md)
+starts with:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\validate_mouse_controls.py
@@ -79,6 +84,13 @@ drag releases, scroll stops on release, right-click does not repeat while held.
 Press Esc before using the result controls. Record only hand-observed results.
 
 **Next step:** resolve any reported physical failure and complete all six checks.
+
+Additional P1 input defects were reproduced after the new master audit:
+a one-frame raw Pinch with stale stable Pointing could queue a ghost click, and
+a second pinch could double-click before a hold became a drag. The EventEngine
+now requires raw/stable agreement to start, waits for the second release, and
+allows a second hold to become a drag. Focused input checks: **47 passed**.
+These code changes still need physical confirmation in a fresh app process.
 
 ## Step 3 — complete feature set
 
@@ -128,6 +140,26 @@ No packaging/deployment result is claimed for this step.
 - **Manual action / next step:** 20–30 minute session with hand loss, rapid pose
   changes, pause during drag, camera disconnect/reconnect and clean restart.
 
+The new audit also reproduced a camera worker failure: empty/grayscale frames,
+mirror exceptions, `isOpened()` exceptions and release exceptions could leave
+the capture thread dead or the app falsely connected. Frame validation and
+driver exception recovery were corrected; five new regressions failed before
+the fix, then the focused camera suite passed **16 tests**. Physical unplug and
+reconnect still need checking.
+
+## Release preparation after the new master audit
+
+- The existing September 25 ONEDIR executable is not a current build. Its spec
+  excluded `matplotlib`, although MediaPipe imports it at startup. That exclusion
+  was removed. `main.py --self-check` now loads the model and processes one
+  synthetic frame without camera/UI; the source check passed. A frozen EXE
+  check is added to Windows build and release workflows but has not run yet.
+- Build scripts now resolve the repository when called from another directory.
+  PowerShell parsing passed; the installer and MSIX scripts reached their
+  expected missing-tool/placeholder checks from a temporary working directory.
+- Tag-triggered releases are now drafts until the installer passes physical
+  validation. No tag, installer or Release has been published.
+
 ## Dependency privacy finding
 
 At **00:44:25** the installed MediaPipe 0.10.35 native library logged a failed
@@ -136,10 +168,12 @@ established. The application camera code processes frames in memory; that does
 not establish that all dependency code makes no network requests.
 
 The same behavior has an [upstream report](https://github.com/google-ai-edge/mediapipe/issues/6291).
-Privacy/notices are corrected to disclose this observed limitation. A validated
-dependency configuration is still needed before claiming zero telemetry or
-zero network activity. No dependency downgrade, firewall change or silent log
-suppression was performed.
+[MediaPipe's privacy notice](https://github.com/google-ai-edge/mediapipe#privacy-notice)
+now states that Tasks APIs send performance and usage metrics to Google while
+processing input data on device. Privacy/notices and website claims were
+corrected to disclose this. The local log does not establish a successful
+transfer or the exact payload in that run. No dependency downgrade, firewall
+change or silent log suppression was performed.
 
 ## Reproduction commands
 
@@ -149,6 +183,8 @@ suppression was performed.
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Results: **346 passed in 7.08 seconds**, compilation passed, no broken requirements.
+Latest results: **356 passed in 6.79 seconds**. A source `main.py --self-check`
+also passed native VIDEO inference without opening a camera or GUI. The
+post-change compilation and dependency checks are to be repeated before commit.
 The CI push filter now includes `debug/**` and compiles tests/scripts as well as
 application code so these checkpoints receive automated remote validation.

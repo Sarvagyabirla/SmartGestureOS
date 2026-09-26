@@ -8,14 +8,13 @@ notices; the finished distribution must include those notices.
 
 ## Dependency network behavior
 
-A real run with MediaPipe 0.10.35 on 27 September 2026 produced a native
-`portable_clearcut_uploader.cc` error reporting a failed Clearcut upload.
-The log does not identify the payload or establish a successful transfer.
-[MediaPipe issue #6291](https://github.com/google-ai-edge/mediapipe/issues/6291)
-reports a matching message. This remains unresolved for this project, so these
-dependencies cannot currently be represented as having verified zero telemetry
-or no network activity. See [PRIVACY.md](PRIVACY.md) for the observation and its
-limits.
+[MediaPipe's privacy notice](https://github.com/google-ai-edge/mediapipe#privacy-notice)
+states that Tasks APIs send performance and usage metrics to Google while input
+data remains on device. A real run with MediaPipe 0.10.35 on 27 September 2026
+also produced a native `portable_clearcut_uploader.cc` error reporting a failed
+upload. That log does not identify the payload or establish a successful
+transfer in the observed run. See [PRIVACY.md](PRIVACY.md) for the observation
+and its limits.
 
 ---
 

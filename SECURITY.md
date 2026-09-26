@@ -25,10 +25,11 @@ You can expect:
 
 SmartGestureOS is a Windows desktop application with local camera processing:
 
-- **Dependency network behavior:** MediaPipe 0.10.35 logged a failed native
-  uploader attempt during a real run. Payload and successful transmission were
-  not established. The current dependency stack has no verified zero-network
-  guarantee; see [PRIVACY.md](PRIVACY.md).
+- **Dependency network behavior:** [MediaPipe states](https://github.com/google-ai-edge/mediapipe#privacy-notice)
+  that Tasks APIs send performance and usage metrics to Google while processing
+  input images on device. MediaPipe 0.10.35 logged a failed native uploader
+  attempt during a real run. The exact payload and delivery in that run were
+  not established; see [PRIVACY.md](PRIVACY.md).
 - **Inputs:** Camera frames, local profiles and custom gesture files. The
   application does not implement a remote-control server.
 - **Attack surface:** Local input validation (profile names, gesture names, file paths).

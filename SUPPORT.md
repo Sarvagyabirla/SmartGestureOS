@@ -48,7 +48,7 @@ A: Pause with Ctrl+Alt+G first. Use even, front-facing lighting and check that t
 A: Yes — click **Train Custom Gesture** to open the Trainer window. Automation pauses while it opens. See [GESTURES.md](GESTURES.md) for instructions.
 
 **Q: Does SmartGestureOS upload any data?**  
-A: The application has no account or analytics service, but its MediaPipe 0.10.35 dependency logged a failed native Clearcut upload during a real run on 27 September 2026. The payload and successful transmission status are unknown. This dependency behavior remains unresolved; a zero-telemetry guarantee cannot currently be made. See [PRIVACY.md](PRIVACY.md) and [upstream issue #6291](https://github.com/google-ai-edge/mediapipe/issues/6291).
+A: The application code has no account or analytics service. [MediaPipe's privacy notice](https://github.com/google-ai-edge/mediapipe#privacy-notice) says its Tasks APIs send performance and usage metrics to Google and process input images on device. Its native uploader logged a failed attempt during a real run on 27 September 2026. We did not establish the payload or delivery status of that attempt. See [PRIVACY.md](PRIVACY.md).
 
 **Q: What Python version is required?**  
 A: Python 3.11 is the supported project environment. Check `requirements.txt` if you use a different Python version.

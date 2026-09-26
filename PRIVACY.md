@@ -12,9 +12,11 @@
 
 SmartGestureOS processes webcam frames locally for gesture recognition. Its
 application code has no account system or analytics service. The bundled
-MediaPipe dependency has produced a native uploader error during a real run;
-the payload and successful transmission status are unknown. The current build
-cannot be described as having verified zero telemetry or zero network activity.
+MediaPipe Tasks dependency [states that it sends API performance and usage
+metrics to Google](https://github.com/google-ai-edge/mediapipe#privacy-notice).
+MediaPipe also states that input data such as images is processed on device and
+is not sent to Google. A native uploader error was observed during a real run;
+the exact payload and successful transmission status of that run are unknown.
 
 ---
 
@@ -31,9 +33,9 @@ logs locally as described below.
 | Hand landmark coordinates | Used in memory for gesture recognition and control. |
 | Gesture history | No history upload or analytics feature is implemented. |
 | User identity / account | **No account required.** No login, no email, no name. |
-| Usage analytics / telemetry | No analytics service is implemented in the application code. Native MediaPipe uploader activity has been observed; see below. |
-| Crash reports | The application writes local diagnostic logs and has no automatic crash-report submission feature. Dependency uploader behavior remains unresolved. |
-| Network connections | A MediaPipe native uploader logged a failed Clearcut upload. Payload, network delivery, and successful upload have not been established. |
+| Usage analytics / telemetry | No analytics service is implemented in the application code. MediaPipe states that its Tasks APIs send performance and usage metrics to Google; see below. |
+| Crash reports | The application writes local diagnostic logs and has no automatic crash-report submission feature. The content of MediaPipe metrics has not been independently inspected. |
+| Network connections | MediaPipe states that its Tasks APIs send metrics to Google. In one local run, its native uploader logged a failed Clearcut upload. |
 
 ## Observed MediaPipe uploader activity
 
@@ -46,8 +48,11 @@ reports a matching native uploader message with this dependency version.
 
 The observed log does not reveal the payload or establish a successful transfer.
 It does not establish that camera frames were transmitted. The dependency's
-behavior must be investigated and resolved before making a zero-telemetry or
-no-network guarantee.
+[privacy notice](https://github.com/google-ai-edge/mediapipe#privacy-notice)
+states that Tasks APIs send performance and usage metrics to Google and do not
+send input images or video. We have not independently inspected the network
+payload or verified which metrics this build sends. A zero-telemetry or
+no-network guarantee would be inaccurate.
 
 ---
 

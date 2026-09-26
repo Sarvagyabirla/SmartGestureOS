@@ -17,11 +17,11 @@ Computer Vision Based Touchless Human-Computer Interaction
 
 ## Features
 
-**Release status (27 September 2026):** 346 automated tests pass. Physical
+**Release status (27 September 2026):** 356 automated tests pass. Physical
 mouse/mode acceptance and a validated standalone installer are still pending;
 see [release readiness](RELEASE_READINESS.md). The
-[privacy policy](PRIVACY.md) records observed MediaPipe dependency uploader
-activity and the limits of current network-behavior validation.
+[privacy policy](PRIVACY.md) explains MediaPipe's published metrics disclosure,
+the observed native uploader activity, and the limits of local validation.
 
 - **Three control modes** — GENERAL (mouse + OS), MEDIA, and DRAW
 - **Real-time hand tracking** via MediaPipe Hand Landmarker (21 3D landmarks)

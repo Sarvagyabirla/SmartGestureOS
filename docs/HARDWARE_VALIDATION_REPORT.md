@@ -4,7 +4,7 @@
 
 ## Automated checks
 
-- Python 3.11.9: `python -m pytest tests/ -v --tb=short`: **346 passed in 7.08 seconds** after runtime, controller, drawing, profile and UI safety corrections.
+- Python 3.11.9: `python -m pytest tests/ -q --tb=short`: **356 passed in 6.79 seconds** after camera recovery, click transition and frozen startup probe corrections.
 - `python -m compileall -q main.py config.py src tests scripts`: passed.
 - `python -m pip check`: passed, no broken requirements.
 - RGB skeleton drawing is covered with deterministic red and green color-phase
@@ -87,13 +87,21 @@ The local report recorded 78 motion receipts, one blocked input call, no
 button/wheel receipts, and all six human observations `not_recorded`. Therefore
 the core-input hardware gate remains pending. No webcam images were saved.
 
+After the new master audit, the user explicitly answered **yes** when asked
+whether the cursor followed the hand inside the guided area while the physical
+mouse stayed still. This is a physical cursor observation; it does not establish
+click, drag, scroll or right-click results. No new saved guide report was found
+for that answer. The single-click observation is pending.
+
 A separate read-only worker probe acquired the real Windows audio endpoint,
 read 40.1% volume (−96 to 0 dB range), and closed cleanly. The running app also
 acquired the endpoint successfully after the pycaw API/COM lifecycle fix.
 This validates endpoint access, not physical volume-up/down gestures.
 
 The live native MediaPipe log also contained a failed Clearcut uploader attempt.
-Successful transfer and payload contents were not established; see the
+[MediaPipe states](https://github.com/google-ai-edge/mediapipe#privacy-notice)
+that Tasks APIs send performance and usage metrics to Google. Successful
+transfer and payload contents in the local run were not established; see the
 [current report](RELEASE_EXECUTION_2026-09-27.md) and privacy documentation.
 
 - Present each gesture deliberately and verify the expected action in all three
