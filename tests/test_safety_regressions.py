@@ -38,6 +38,20 @@ def _21_landmarks(x=0.5, y=0.5):
     ]
 
 
+def _make_mapper(width, height):
+    """Real mapper, timers and reset paths with lasting fake desktop input."""
+    from src.gesture_mapper import GestureMapper
+
+    with (
+        patch("src.virtual_mouse.ctypes.windll"),
+        patch("src.gesture_mapper.VolumeController"),
+        patch("src.gesture_mapper.BrightnessController"),
+        patch("src.gesture_mapper.FeedbackController"),
+        patch("src.settings_manager.settings_manager.register_callback"),
+    ):
+        return GestureMapper(width, height)
+
+
 # ── Automation state management (§5, §6) ─────────────────────────────────────
 
 class TestAutomationState:
@@ -123,8 +137,7 @@ class TestAutomationState:
 
 class TestTemporalReset:
     def test_reset_temporal_state_resets_timer(self):
-        from src.gesture_mapper import GestureMapper
-        mapper = GestureMapper(640, 480)
+        mapper = _make_mapper(640, 480)
         mapper.timer.target_gesture = "Pointing"
         mapper.timer.start_time = time.perf_counter() - 999
         mapper.reset_temporal_state()
@@ -132,15 +145,13 @@ class TestTemporalReset:
         assert mapper.timer.start_time == 0.0
 
     def test_reset_temporal_state_resets_sleep_timer(self):
-        from src.gesture_mapper import GestureMapper
-        mapper = GestureMapper(640, 480)
+        mapper = _make_mapper(640, 480)
         mapper.sleep_timer.target_gesture = "Victory"
         mapper.reset_temporal_state()
         assert mapper.sleep_timer.target_gesture is None
 
     def test_reset_temporal_state_clears_brightness(self):
-        from src.gesture_mapper import GestureMapper
-        mapper = GestureMapper(640, 480)
+        mapper = _make_mapper(640, 480)
         mapper.brightness_gesture_active = True
         mapper.last_brightness_y = 0.5
         mapper.reset_temporal_state()
@@ -227,8 +238,7 @@ class TestDrawingResize:
         assert result.success
 
     def test_mapper_update_frame_dimensions_calls_canvas_resize(self):
-        from src.gesture_mapper import GestureMapper
-        mapper = GestureMapper(1280, 720)
+        mapper = _make_mapper(1280, 720)
         assert mapper.canvas.width == 1280
         assert mapper.canvas.height == 720
         mapper.update_frame_dimensions(640, 480)
@@ -386,9 +396,8 @@ class TestActionResults:
 
 class TestMapperFeedback:
     def test_execute_action_speaks_on_success(self):
-        from src.gesture_mapper import GestureMapper
         from src.models import ActionResult
-        mapper = GestureMapper(640, 480)
+        mapper = _make_mapper(640, 480)
         mapper.feedback = MagicMock()
 
         success_fn = MagicMock(return_value=ActionResult(True, "test", "ok"))
@@ -397,9 +406,8 @@ class TestMapperFeedback:
         mapper.feedback.speak.assert_called_once()
 
     def test_execute_action_does_not_speak_on_failure(self):
-        from src.gesture_mapper import GestureMapper
         from src.models import ActionResult
-        mapper = GestureMapper(640, 480)
+        mapper = _make_mapper(640, 480)
         mapper.feedback = MagicMock()
 
         fail_fn = MagicMock(return_value=ActionResult(False, "test", "cooldown"))

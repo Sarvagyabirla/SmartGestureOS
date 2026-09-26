@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 import time
+from unittest.mock import patch
 from src.utils import OneEuroFilter, PointSmoother, get_angle, cubic_bezier_interpolation
 from src.gesture_classifier import GestureClassifier
 from src.gesture_mapper import GestureMapper
@@ -80,7 +81,16 @@ class TestGestureClassifier(unittest.TestCase):
 
 class TestGestureMapper(unittest.TestCase):
     def setUp(self):
-        self.mapper = GestureMapper(1920, 1080)
+        # VirtualMouse retains the fake user32 after these patches end.
+        # Keep actual mouse/engine reset logic without desktop input or speech.
+        with (
+            patch("src.virtual_mouse.ctypes.windll"),
+            patch("src.gesture_mapper.VolumeController"),
+            patch("src.gesture_mapper.BrightnessController"),
+            patch("src.gesture_mapper.FeedbackController"),
+            patch("src.settings_manager.settings_manager.register_callback"),
+        ):
+            self.mapper = GestureMapper(1920, 1080)
         
     def test_mode_switching(self):
         # Initial mode

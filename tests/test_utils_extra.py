@@ -1,6 +1,7 @@
 import sys
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.utils import OneEuroFilter, PointSmoother
@@ -46,6 +47,9 @@ def test_gesture_hold_timer():
 
 def test_virtual_mouse_deadzone():
     vm = VirtualMouse(deadzone=5.0)
+    # Retain the real mapping/smoother but never move the user's cursor.
+    vm.user32 = MagicMock()
+    vm.screen_x = vm.screen_y = 0
     vm.screen_w = 1920
     vm.screen_h = 1080
     

@@ -107,9 +107,11 @@ class TrainerUI(ctk.CTkToplevel):
             self.after(100, lambda: self.record_loop(name)) # Record sample every 100ms
         else:
             self.is_recording = False
-            gesture_trainer.save_models()
-            self.status_label.configure(text="Status: Saved Successfully!", text_color="green")
             self.record_btn.configure(state="normal")
+            if not gesture_trainer.save_models():
+                self.status_label.configure(text="Save failed. Samples remain in memory; retry saving.", text_color="red")
+                return
+            self.status_label.configure(text="Status: Saved Successfully!", text_color="green")
             self.name_entry.delete(0, "end")
             self.update_list()
             
@@ -121,6 +123,7 @@ class TrainerUI(ctk.CTkToplevel):
         self.list_text.configure(state="disabled")
         
     def on_closing(self):
+        self.is_recording = False
         if self.on_close_callback:
             self.on_close_callback()
         self.destroy()

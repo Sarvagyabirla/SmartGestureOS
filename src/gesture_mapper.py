@@ -104,6 +104,7 @@ class GestureMapper:
         self.last_brightness_y: float | None = None
         self.brightness_gesture_active: bool = False
         self.is_sleeping: bool = False
+        self._mode_switch_gesture: str | None = None
 
         self.action_registry = {
             "open_vscode":      {"func": self.shortcut.open_vscode,      "repeatable": False},
@@ -162,6 +163,7 @@ class GestureMapper:
         self.last_pinch_time = 0.0
         self.brightness_gesture_active = False
         self.last_brightness_y = None
+        self._mode_switch_gesture = None
         self.canvas.end_stroke()
         if hasattr(self.mouse, "engine"):
             self.mouse.engine.reset()
@@ -206,9 +208,9 @@ class GestureMapper:
 
     def set_mode(self, mode: str) -> None:
         if mode in self.modes:
-            self.mode = mode
             self.mouse.release_all()
-            self.brightness_gesture_active = False
+            self.reset_temporal_state()
+            self.mode = mode
             logger.info(f"Switched Mode: {self.mode}")
 
     def cycle_mode(self) -> None:
@@ -236,11 +238,12 @@ class GestureMapper:
         logger.info(
             f"Mapper dims {self.frame_w}x{self.frame_h} -> {new_w}x{new_h}: resizing canvas."
         )
-        self.frame_w = new_w
-        self.frame_h = new_h
         result = self.canvas.resize(new_w, new_h)
         if not result.success:
             logger.error(f"Canvas resize failed: {result.message} — {result.error}")
+            return
+        self.frame_w = new_w
+        self.frame_h = new_h
 
     # ── Main process loop ──────────────────────────────────────────────────────
 
@@ -265,17 +268,22 @@ class GestureMapper:
 
         mappings = SETTINGS.get("mappings", {}).get(self.mode, {})
         sleep_gesture = self.get_sleep_gesture(mappings)
+        if raw_gesture != self._mode_switch_gesture:
+            self._mode_switch_gesture = None
+        mode_switch_held = self._mode_switch_gesture is not None
+        gesture_confirmed = gesture == raw_gesture and not mode_switch_held
 
         # ── Sleep / wake ──────────────────────────────────────────────────────
         gesture = stable_gesture
-        if sleep_gesture and gesture == sleep_gesture:
+        if sleep_gesture and gesture == sleep_gesture and gesture_confirmed:
             if self.sleep_timer.check(sleep_gesture):
                 self.is_sleeping = not self.is_sleeping
                 self.feedback.speak("Sleeping" if self.is_sleeping else "Waking up")
                 self.mouse.release_all()
                 return frame, ("System Sleeping" if self.is_sleeping else "System Woke Up"), 1.0
         else:
-            self.sleep_timer.check(None)
+            if raw_gesture != self.sleep_timer.target_gesture or not self.sleep_timer.executed_once:
+                self.sleep_timer.check(None)
 
         if self.is_sleeping:
             msg = (
@@ -292,21 +300,25 @@ class GestureMapper:
             return frame, "Sleeping", sleep_prog
 
         mapped_action     = mappings.get(gesture)
-        raw_mapped_action = mappings.get(raw_gesture)
 
         # ── Mode-specific continuous actions ──────────────────────────────────
         if self.mode == "GENERAL":
             self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h)
 
-            if gesture == "Middle Finger":
-                self.brightness.set_brightness_from_y(h1[12].y)
-                action = "Adjusting Brightness"
+            if gesture == "Middle Finger" and gesture_confirmed:
+                result = self.brightness.set_brightness_from_y(h1[12].y)
+                action = (
+                    result.message if result.success or result.error is None
+                    else f"Brightness unavailable: {result.message}"
+                )
 
             if gesture != "Middle Finger":
                 self.brightness_gesture_active = False
 
         elif self.mode == "DRAW":
-            draw_mode = (raw_gesture == "Pointing") or (gesture == "Pointing")
+            # Start from fresh geometry without waiting for the history mode;
+            # stop as soon as Pointing releases or confidence is insufficient.
+            draw_mode = raw_gesture == "Pointing" and gesture not in (None, "None", "Unknown")
             sx, sy = self.canvas.draw(index_x, index_y, draw_mode=draw_mode)
 
             if not draw_mode:
@@ -315,19 +327,31 @@ class GestureMapper:
             frame = self.canvas.get_overlay(frame)
 
         # ── Discrete actions ──────────────────────────────────────────────────
-        if mapped_action == "toggle_sleep":
+        if not gesture_confirmed:
+            # Confidence loss cancels an unfinished hold. An action already
+            # consumed remains latched until its raw gesture actually releases.
+            if raw_gesture != self.timer.target_gesture or not self.timer.executed_once:
+                self.timer.check(None)
+            progress = 0.0
+        elif mapped_action == "toggle_sleep":
             self.timer.check(None)
             progress = self.sleep_timer.get_progress()
         elif mapped_action:
             action_info  = self.action_registry.get(mapped_action, {})
             is_repeatable = action_info.get("repeatable", False)
             if self.timer.check(gesture, is_repeatable=is_repeatable):
+                previous_mode = self.mode
                 action = self.execute_action(mapped_action)
+                if self.mode != previous_mode:
+                    # set_mode resets every timer, but this held gesture has
+                    # already switched modes and must release before rearming.
+                    self._mode_switch_gesture = gesture
                 if action:
                     return frame, action, 1.0
             progress = self.timer.get_progress()
         else:
             self.timer.check(None)
+            progress = 0.0
 
         return frame, action, progress
 

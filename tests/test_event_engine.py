@@ -107,8 +107,10 @@ def test_double_click_no_extra_single():
     engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
     assert engine.state == EventState.PINCH_RELEASE_WAIT
 
-    # Second Pinch within window (immediately)
+    # Second short pinch begins within the window, then releases.
     engine.process("Pinch", "Pinch", 500, 400, 1280, 720, lms)
+    assert engine.state == EventState.PINCH_DOWN
+    engine.process("Pointing", "Pointing", 500, 400, 1280, 720, lms)
     assert engine.state == EventState.COOLDOWN
 
     # Verify double_click path (4 mouse_event calls: 2×down 2×up)

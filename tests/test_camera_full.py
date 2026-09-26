@@ -98,8 +98,7 @@ def test_camera_stop_cleanup():
 def test_camera_is_connected_after_read():
     """is_connected becomes True after a successful read."""
     mock_cap = _mock_cap(opened=True, read_ok=True)
-    with patch("cv2.VideoCapture", return_value=mock_cap), \
-         patch("cv2.flip", return_value=MagicMock()):
+    with patch("cv2.VideoCapture", return_value=mock_cap):
         from src.camera import Camera
         cam = Camera(index=0)
         cam.start()

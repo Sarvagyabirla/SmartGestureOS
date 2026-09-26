@@ -23,14 +23,21 @@ You can expect:
 
 ## Threat Model
 
-SmartGestureOS is a **local-only** Windows desktop application:
+SmartGestureOS is a Windows desktop application with local camera processing:
 
-- **No network access.** The application does not make any outbound connections.
-- **No remote code execution surface.** All input is from local camera and user settings.
+- **Dependency network behavior:** [MediaPipe states](https://github.com/google-ai-edge/mediapipe#privacy-notice)
+  that Tasks APIs send performance and usage metrics to Google while processing
+  input images on device. MediaPipe 0.10.35 logged a failed native uploader
+  attempt during a real run. The exact payload and delivery in that run were
+  not established; see [PRIVACY.md](PRIVACY.md).
+- **Inputs:** Camera frames, local profiles and custom gesture files. The
+  application does not implement a remote-control server.
 - **Attack surface:** Local input validation (profile names, gesture names, file paths).
   All user-provided strings that are used to construct file paths are now validated
   against an allowlist regex before use.
-- **Camera frames:** Processed in memory by MediaPipe. Never written to disk.
+- **Camera frames:** The normal pipeline processes frames in memory. Explicit
+  development diagnostics can save frames, and the screenshot action saves the
+  desktop when invoked.
 - **Privilege:** Runs as the current user. Does not request elevation.
 
 ## Out of Scope

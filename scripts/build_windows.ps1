@@ -1,12 +1,14 @@
 $ErrorActionPreference = "Stop"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 Write-Host "=== SmartGestureOS Build Script ===" -ForegroundColor Cyan
 Write-Host "Preserving existing release artifacts..."
 
-$pythonExe = if (Test-Path ".\.venv\Scripts\python.exe") { ".\.venv\Scripts\python.exe" } else { "python" }
+$venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+$pythonExe = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { "python" }
 
 Write-Host "Running pre-build validation with $pythonExe..."
-& $pythonExe -m compileall -q main.py config.py src
+& $pythonExe -m compileall -q (Join-Path $repoRoot "main.py") (Join-Path $repoRoot "config.py") (Join-Path $repoRoot "src")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "FAIL: compileall found syntax errors. Aborting." -ForegroundColor Red
     exit 1
@@ -14,13 +16,13 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Running PyInstaller (ONEDIR)..."
 & $pythonExe -m PyInstaller --noconfirm --clean `
-    --workpath .\build\SmartGestureOS `
-    --distpath .\dist `
-    .\packaging\windows\SmartGesture.spec
+    --workpath (Join-Path $repoRoot "build\SmartGestureOS") `
+    --distpath (Join-Path $repoRoot "dist") `
+    (Join-Path $repoRoot "packaging\windows\SmartGesture.spec")
 
 if ($LASTEXITCODE -eq 0) {
-    $exe = "dist\SmartGestureOS\SmartGestureOS.exe"
-    if (Test-Path $exe) {
+    $exe = Join-Path $repoRoot "dist\SmartGestureOS\SmartGestureOS.exe"
+    if (Test-Path -LiteralPath $exe) {
         Write-Host "Build COMPLETE: $exe" -ForegroundColor Green
         Write-Host ""
         Write-Host "To create the installer, run Inno Setup compiler (iscc):" -ForegroundColor Cyan

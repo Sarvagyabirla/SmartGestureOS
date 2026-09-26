@@ -305,6 +305,9 @@ def test_inference_worker_closes_its_detector_on_exit(make_loop, fails):
 
     app.detector.close.assert_called_once()
 
+    app.mapper.volume.initialize.assert_called_once_with()
+    app.mapper.volume.close.assert_called_once_with()
+
 
 def test_watchdog_keeps_tracking_at_the_250ms_boundary(make_loop):
     app, run = make_loop([FrameStep(10.0, hand_at())])

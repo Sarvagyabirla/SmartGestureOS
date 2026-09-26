@@ -65,7 +65,7 @@ checks are inputs to each step; they do not bypass the physical acceptance gates
 | Step | Name | Status | Acceptance still required |
 |---|---|---|---|
 | 1 | Real hand tracking | DONE | Actual application displays moving 21-point landmarks, handles hand exit/re-entry, and remains responsive without crashing. |
-| 2 | Core mouse controls | PARTIAL | Late double-click timing bug fixed and automated regressions pass. Physical cursor, click, double-click, drag/drop, scroll, and right-click behavior still needs a live hand. |
+| 2 | Core mouse controls | PARTIAL | Pinch transitions, click targeting, scroll limits and cursor reset fixed; automated regressions pass. Physical cursor, click, double-click, drag/drop, scroll, and right-click results are still pending. |
 | 3 | Full feature set | NOT STARTED | GENERAL, MEDIA, DRAW, system actions, mode switching, and pause/resume work or have accurate limitations. |
 | 4 | Stability | NOT STARTED | 20–30 minute session, hand loss, camera reconnect, pause during drag, rapid changes, and safe shutdown. |
 | 5 | Packaged desktop EXE | NOT STARTED | Rebuild ONEDIR and repeat core physical checks in the executable. |
@@ -149,17 +149,63 @@ deferred manifest ordering correction.
 - **Remaining blockers:** None for Step 1. The machine's pycaw audio endpoint failed initialization; that is tracked under Step 3.
 - **Next step:** Validate core mouse controls, including the fixed double-click timing boundary.
 
+## Resumed repository audit
+
+The next development pass began with a clean working tree at `6eb6a52` on
+`debug/phase1b-hand-detection`, matching its remote branch. After fetching,
+`origin/main` was `fb70efc` (merged PR #4) and its tree matched that debug HEAD.
+No main merge or history rewrite was performed in this pass. The fresh baseline
+was **182 passed in 6.73 seconds**; compileall and `pip check` also passed.
+
 ## Step 2 results — CORE MOUSE CONTROLS
 
 **STATUS: PARTIAL — PHYSICAL GESTURES PENDING**
 
-- **What was wrong:** A second Pinch after the 220 ms double-click window still generated a double-click.
-- **Root cause:** `PINCH_RELEASE_WAIT` checked only whether the next result was Pinch and did not compare elapsed time to `double_click_window_ms`.
-- **What was changed:** A late second Pinch now completes the first single click and begins a fresh pinch state, allowing its own click or drag. Added a deterministic regression test.
-- **Files changed:** `src/event_engine.py`, `tests/test_event_engine.py`.
-- **Automated results:** Regression reproduced the failure before the fix. Afterward, 19 targeted mouse tests passed; full suite **182 passed**, compileall passed, and `pip check` passed.
-- **Manual test required:** With the live app on and a Notepad target focused, physically validate Pointing, single Pinch, double Pinch, held Pinch drag/drop, Two Fingers scrolling, and Three Fingers right-click.
-- **Exact command:** `.\.venv\Scripts\python.exe main.py --start-paused`
-- **Expected result:** Resume with Ctrl+Alt+G; wait for the five-frame neutral re-arm; each gesture should have only its intended effect in the temporary Notepad document. Pause again with Ctrl+Alt+G.
-- **Remaining blockers:** These hand actions require the user at the camera. The attempted live interval remained paused until the hotkey was sent programmatically, then saw no hand frames while armed; no physical mouse-gesture result is claimed.
+- **What was wrong:** The original late second-pinch bug was fixed in `d58b224`.
+  Further deterministic checks reproduced delayed drag release, a short pinch
+  becoming a drag because the stable label lagged, repeated input from a held
+  second pinch, cursor drift before delayed click dispatch, excessive scroll,
+  and stale pointing coordinates after tracking reset. A release sampled just
+  beyond the drag deadline could also disappear without a click or drag.
+- **Root cause:** Stable gesture history was treated as a still-held pose;
+  double-click consumption was not retained until release; movement continued
+  during pending clicks; an unbounded loop emitted every accumulated wheel tick;
+  the legacy uncalibrated hand-size placeholder `1.0` became an actual scaling
+  measurement; reset left smoothing and deadzone coordinates intact.
+- **What was changed:** Use raw geometry for release while retaining confidence
+  checks at action entry. Keep click targets fixed, consume a double pinch until
+  released, and retain a pending click when no drag press actually occurred.
+  Reject invalid scroll samples, bound calibrated scale to 0.25–4, emit at most
+  one wheel event of three ticks per frame, and discard excess whole ticks.
+  Treat the legacy placeholder as uncalibrated. Release input on missing hand
+  data and reset cursor smoothing on release. Added an opt-in physical guide with
+  production camera/classifier/input logic and input confined to its target.
+- **Files changed:** `src/event_engine.py`, `src/mouse_controller.py`,
+  `src/virtual_mouse.py`; regression tests for temporal transitions, scaling and
+  mouse reset; `scripts/validate_mouse_controls.py` and
+  `docs/MOUSE_HARDWARE_CHECK.md`. Existing automated fixtures were also corrected
+  to mock desktop input for their full lifetime.
+- **Automated results:** The new regressions reproduced the defects before
+  correction. The targeted event/input suite passed **34 tests**; the scaling
+  checks passed **11 tests**. Diagnostic boundary and UI behavior checks passed
+  **13 tests**. Full suite: **223 passed in 6.60 seconds**. Syntax compilation and dependency
+  checks passed. Runtime fixes and their regressions are committed as `d544370`.
+- **Manual test required:** Physically validate Pointing, single Pinch, double
+  Pinch, held Pinch drag/drop, Two Fingers scrolling in both directions, and
+  Three Fingers right-click. Follow [the guide](MOUSE_HARDWARE_CHECK.md).
+- **Exact command:** `.\.venv\Scripts\python.exe scripts\validate_mouse_controls.py`
+- **Expected result:** Start each check in the target window, briefly remove the
+  hand for neutral re-arm, and verify the requested Windows interaction. Esc
+  pauses; focus loss also pauses. Record explicit human observations and save
+  the report. Event counts alone are not proof of physical gesture operation.
+- **Hardware attempt:** The guided process ran on 26 September from 23:51:48
+  to 23:52:01 local time. Camera 0 detected a real hand with 21 landmarks while
+  automation remained paused. Shutdown saved a local report with all six results
+  `not_recorded`, no input receipts, and no blocked calls. This does not establish
+  a mouse-control pass. No camera images were saved. The diagnostic now raises
+  its target once after application startup so the preview cannot hide the
+  guide at launch; wheel direction is also displayed explicitly. Those changes
+  have mocked checks but have not yet had a second physical run.
+- **Remaining blockers:** The six interactions still need explicit physical
+  results. Normal desktop use and later stability/packaged checks remain pending.
 - **Next step:** Complete this physical check before starting Step 3.

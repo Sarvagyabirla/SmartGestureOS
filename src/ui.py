@@ -164,7 +164,16 @@ class SmartGestureApp(ctk.CTk):
         else:
             logger.warning("No toggle_pause_callback or set_automation_callback configured on UI.")
 
+    def _pause_for_auxiliary_ui(self):
+        """Practicing/configuring gestures must not trigger desktop actions."""
+        if self.set_automation_callback is not None:
+            self.set_automation_callback(False)
+        elif self.toggle_pause_callback is not None and self.automation_enabled:
+            self.toggle_pause_callback()
+        self.automation_enabled = False
+
     def open_coach(self):
+        self._pause_for_auxiliary_ui()
         from src.ui_coach import CoachUI
         if not hasattr(self, 'coach_window') or self.coach_window is None or not self.coach_window.winfo_exists():
             self.coach_window = CoachUI(self, on_close_callback=lambda: setattr(self, 'coach_window', None))
@@ -172,6 +181,7 @@ class SmartGestureApp(ctk.CTk):
             self.coach_window.focus()
         
     def open_settings(self):
+        self._pause_for_auxiliary_ui()
         from src.ui_settings import SettingsUI
         if self.settings_window is None or not self.settings_window.winfo_exists():
             self.settings_window = SettingsUI(self, on_close_callback=lambda: setattr(self, 'settings_window', None))
@@ -179,6 +189,7 @@ class SmartGestureApp(ctk.CTk):
             self.settings_window.focus()
             
     def open_trainer(self):
+        self._pause_for_auxiliary_ui()
         from src.ui_trainer import TrainerUI
         if self.trainer_window is None or not self.trainer_window.winfo_exists():
             self.trainer_window = TrainerUI(self, on_close_callback=lambda: setattr(self, 'trainer_window', None))

@@ -64,6 +64,18 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean packaging/windows/SmartGesture.spec
 
+      - name: Check frozen startup and native inference
+        run: |
+          $exe = (Resolve-Path 'dist\SmartGestureOS\SmartGestureOS.exe').Path
+          $probe = Start-Process -FilePath $exe -ArgumentList '--self-check' -PassThru -WindowStyle Hidden
+          if (-not $probe.WaitForExit(60000)) {
+            Stop-Process -Id $probe.Id -Force
+            throw 'Frozen self-check timed out.'
+          }
+          if ($probe.ExitCode -ne 0) {
+            throw "Frozen self-check failed with exit code $($probe.ExitCode)."
+          }
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -137,4 +149,4 @@ jobs:
           files: |
             ${{ steps.installer.outputs.path }}
             dist/release/SHA256SUMS.txt
-          draft: false
+          draft: true

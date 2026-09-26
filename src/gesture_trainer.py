@@ -30,7 +30,7 @@ _MAX_SAMPLES_PER_GESTURE = 50
 
 def validate_gesture_name(name: str) -> tuple[bool, str]:
     """Returns (is_valid, reason_if_invalid)."""
-    if not name:
+    if not isinstance(name, str) or not name:
         return False, "Gesture name cannot be empty."
     if not _GESTURE_NAME_PATTERN.match(name):
         return False, (
@@ -44,8 +44,8 @@ def validate_gesture_name(name: str) -> tuple[bool, str]:
 
 
 class GestureTrainer:
-    def __init__(self):
-        self.models_dir = CUSTOM_GESTURES_DIR
+    def __init__(self, models_dir: Path | None = None):
+        self.models_dir = models_dir if models_dir is not None else CUSTOM_GESTURES_DIR
         # { "gesture_name": [normalized_vector_1, ...] }
         self.custom_gestures: dict[str, list] = {}
         self.load_models()
@@ -57,16 +57,20 @@ class GestureTrainer:
         Normalize 21 landmarks to a translation-, rotation-, and scale-invariant
         vector of 63 floats (21 × 3).
         """
-        if not landmarks or len(landmarks) != 21:
+        # Invalid coordinates must not escape into the processing/UI loops.
+        try:
+            if landmarks is None or len(landmarks) != 21:
+                return None
+            if isinstance(landmarks[0], dict):
+                coords = np.array([[lm["x"], lm["y"], lm.get("z", 0.0)] for lm in landmarks], dtype=float)
+            elif hasattr(landmarks[0], "x"):
+                coords = np.array([[lm.x, lm.y, getattr(lm, "z", 0.0)] for lm in landmarks], dtype=float)
+            else:
+                coords = np.array([[lm[1], lm[2], lm[3] if len(lm) > 3 else 0.0] for lm in landmarks], dtype=float)
+        except (TypeError, ValueError, KeyError, IndexError, AttributeError, OverflowError):
             return None
-
-        # Convert to numpy (x, y, z)
-        if isinstance(landmarks[0], dict):
-            coords = np.array([[lm["x"], lm["y"], lm.get("z", 0.0)] for lm in landmarks])
-        elif hasattr(landmarks[0], "x"):
-            coords = np.array([[lm.x, lm.y, getattr(lm, "z", 0.0)] for lm in landmarks])
-        else:
-            coords = np.array([[lm[1], lm[2], lm[3] if len(lm) > 3 else 0.0] for lm in landmarks])
+        if coords.shape != (21, 3) or not np.isfinite(coords).all():
+            return None
 
         # 1. Translate wrist to origin
         wrist = coords[0].copy()
@@ -95,7 +99,7 @@ class GestureTrainer:
         if max_dist > 0:
             coords /= max_dist
 
-        return coords.flatten().tolist()
+        return coords.flatten().tolist() if np.isfinite(coords).all() else None
 
     # ── Training ──────────────────────────────────────────────────────────────
 
@@ -132,15 +136,39 @@ class GestureTrainer:
         tmp_path = path.with_suffix(".tmp")
         try:
             with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(self.custom_gestures, f)
+                json.dump(self.custom_gestures, f, allow_nan=False)
             tmp_path.replace(path)
             logger.info("Custom gestures saved.")
             return True
         except Exception as e:
             logger.error(f"Failed to save custom gestures: {e}")
-            if tmp_path.exists():
+            try:
                 tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             return False
+
+    @staticmethod
+    def _valid_samples(samples) -> list[list[float]]:
+        """Accept only bounded collections of finite 63-coordinate samples."""
+        if not isinstance(samples, list):
+            return []
+        valid = []
+        for sample in samples:
+            if (not isinstance(sample, list) or len(sample) != 63
+                    or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                           for value in sample)):
+                continue
+            try:
+                array = np.asarray(sample, dtype=float)
+                if not np.isfinite(array).all():
+                    continue
+            except (TypeError, ValueError, OverflowError):
+                continue
+            valid.append(array.tolist())
+            if len(valid) == _MAX_SAMPLES_PER_GESTURE:
+                break
+        return valid
 
     def load_models(self) -> None:
         """Defensive JSON loading with recovery on corruption."""
@@ -153,10 +181,15 @@ class GestureTrainer:
             # Validate structure: must be dict of str → list of lists
             if not isinstance(data, dict):
                 raise ValueError("custom_gestures.json must be a JSON object.")
-            self.custom_gestures = {
-                k: v for k, v in data.items()
-                if isinstance(k, str) and isinstance(v, list)
-            }
+            validated = {}
+            for name, samples in data.items():
+                valid_name, _ = validate_gesture_name(name)
+                valid_samples = self._valid_samples(samples) if valid_name else []
+                if valid_samples:
+                    validated[name] = valid_samples
+                if not valid_name or not isinstance(samples, list) or len(valid_samples) != len(samples):
+                    logger.warning("Ignored invalid/excess custom gesture data for %r.", name)
+            self.custom_gestures = validated
             logger.info(f"Loaded {len(self.custom_gestures)} custom gesture(s).")
         except Exception as e:
             logger.error(f"Failed to load custom gestures (resetting): {e}")
@@ -180,11 +213,17 @@ class GestureTrainer:
         best_match = None
         best_dist = float("inf")
 
-        for name, samples in self.custom_gestures.items():
+        # UI training can add a gesture while the processing thread classifies.
+        for name, samples in tuple(self.custom_gestures.items()):
             if not samples:
                 continue
-            samples_arr = np.array(samples)
-            distances = np.linalg.norm(samples_arr - target_arr, axis=1)
+            try:
+                samples_arr = np.asarray(samples, dtype=float)
+                if samples_arr.ndim != 2 or samples_arr.shape[1] != 63 or not np.isfinite(samples_arr).all():
+                    continue
+                distances = np.linalg.norm(samples_arr - target_arr, axis=1)
+            except (TypeError, ValueError, OverflowError):
+                continue
             min_dist = float(np.min(distances))
             if min_dist < best_dist:
                 best_dist = min_dist
@@ -198,9 +237,10 @@ class GestureTrainer:
 
     def delete_gesture(self, gesture_name: str) -> bool:
         if gesture_name in self.custom_gestures:
-            del self.custom_gestures[gesture_name]
-            self.save_models()
-            return True
+            samples = self.custom_gestures.pop(gesture_name)
+            if self.save_models():
+                return True
+            self.custom_gestures[gesture_name] = samples
         return False
 
     def get_gesture_info(self) -> dict:

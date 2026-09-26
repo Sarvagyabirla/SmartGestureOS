@@ -38,11 +38,20 @@ class Camera:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
+    def _release_capture(self) -> None:
+        """Discard the handle even when a failing driver raises on release."""
+        cap = self.cap
+        self.cap = None
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception as e:
+                logger.warning(f"Camera {self.index}: release failed: {e}")
+
     def _open_capture(self) -> bool:
         """Open (or reopen) the VideoCapture. Returns True if opened."""
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        self._release_capture()
+        cap = None
         try:
             cap = cv2.VideoCapture(self.index)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
@@ -51,11 +60,14 @@ class Camera:
             if cap.isOpened():
                 self.cap = cap
                 return True
-            cap.release()
-            return False
         except Exception as e:
             logger.error(f"Camera._open_capture exception: {e}")
-            return False
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception as e:
+                logger.warning(f"Camera {self.index}: failed open cleanup: {e}")
+        return False
 
     def _update(self) -> None:
         """Background capture thread — handles retry on failure."""
@@ -63,7 +75,12 @@ class Camera:
 
         while self.running:
             # ── No cap / cap closed → retry ───────────────────────────────
-            if self.cap is None or not self.cap.isOpened():
+            try:
+                capture_open = self.cap is not None and self.cap.isOpened()
+            except Exception as e:
+                logger.warning(f"Camera {self.index}: open-state check failed: {e}")
+                capture_open = False
+            if not capture_open:
                 self.is_connected = False
                 if not self._open_capture():
                     logger.warning(f"Camera {self.index}: not available, retrying in 1 s…")
@@ -72,20 +89,34 @@ class Camera:
                 logger.info(f"Camera {self.index}: opened successfully.")
 
             # ── Read frame ────────────────────────────────────────────────
+            failure_reason = None
             try:
                 ret, frame = self.cap.read()
             except Exception as e:
-                logger.error(f"Camera read exception: {e}")
                 ret, frame = False, None
+                failure_reason = f"read exception: {e}"
 
-            if not ret or not isinstance(frame, np.ndarray):
+            if ret and isinstance(frame, np.ndarray):
+                if frame.ndim != 3 or frame.shape[2] != 3 or frame.size == 0 or frame.dtype != np.uint8:
+                    failure_reason = f"invalid frame shape/type: {frame.shape}, {frame.dtype}"
+                else:
+                    try:
+                        frame = cv2.flip(frame, 1)  # Mirror for intuitive control
+                        if not isinstance(frame, np.ndarray) or frame.size == 0:
+                            failure_reason = "mirror returned no frame"
+                    except Exception as e:
+                        failure_reason = f"mirror failed: {e}"
+            elif failure_reason is None:
+                failure_reason = "read returned no frame"
+
+            if failure_reason is not None:
                 self.is_connected = False
                 failed_reads += 1
+                if failed_reads == 1:
+                    logger.warning(f"Camera {self.index}: {failure_reason}")
                 if failed_reads > 30:
                     logger.error("Camera: too many failed reads — releasing and retrying.")
-                    if self.cap:
-                        self.cap.release()
-                        self.cap = None
+                    self._release_capture()
                     failed_reads = 0
                     time.sleep(1.0)
                 continue
@@ -93,7 +124,6 @@ class Camera:
             # ── Good frame ────────────────────────────────────────────────
             self.is_connected = True
             failed_reads = 0
-            frame = cv2.flip(frame, 1)  # Mirror for intuitive control
 
             if self.frame_queue.full():
                 try:
@@ -155,8 +185,6 @@ class Camera:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         self._thread = None
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        self._release_capture()
         self.is_connected = False
         logger.info(f"Camera {self.index}: stopped.")

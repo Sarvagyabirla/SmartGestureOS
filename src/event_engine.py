@@ -23,6 +23,7 @@ Safety contract:
 
 import time
 import enum
+import math
 
 
 class EventState(enum.Enum):
@@ -47,6 +48,8 @@ class EventEngine:
 
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
+        self._pinch_consumed = False
+        self._second_pinch_pending = False
 
         # F-06 FIX: track whether right-click gesture was released before re-arming
         self._right_click_armed = True  # True = ready to fire right-click
@@ -68,6 +71,8 @@ class EventEngine:
         """
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
+        self._pinch_consumed = False
+        self._second_pinch_pending = False
         self.scroll_start_y = None
         self.scroll_accumulator = 0.0
         self._right_click_armed = True
@@ -94,6 +99,17 @@ class EventEngine:
         scale_factor: float = 1.0,
     ) -> None:
         now = time.perf_counter()
+        # Raw Pinch already has geometric enter/release hysteresis in the
+        # classifier. Its stable history can lag an actual release by frames.
+        is_pinching = raw_gesture == "Pinch"
+        is_scrolling = raw_gesture == "Two Fingers"
+        # A transient raw pose must agree with the stable classifier before it
+        # can begin a click or scroll. Raw release still ends an active action
+        # immediately, even while the stable label catches up.
+        can_start_action = (stable_gesture == raw_gesture
+                            and stable_gesture not in (None, "None", "Unknown"))
+        if not is_pinching:
+            self._pinch_consumed = False
 
         # ── Re-acquire from HAND_LOST ──────────────────────────────────────────
         if self.state == EventState.HAND_LOST:
@@ -103,16 +119,14 @@ class EventEngine:
                 return  # Still lost; do nothing
 
         # ── Continuous mouse movement (non-blocking) ───────────────────────────
-        # Move cursor for navigation gestures whenever not actively scrolling
-        if self.state != EventState.SCROLLING:
-            if raw_gesture in (
-                "Pointing", "Pinch", "Three Fingers",
-                "Victory", "Two Fingers", "Closed Fist",
-            ) or stable_gesture in (
-                "Pointing", "Pinch", "Three Fingers",
-                "Victory", "Two Fingers", "Closed Fist",
-            ):
-                self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
+        # Keep the click target fixed from pinch entry through dispatch. Move
+        # a drag only while the pinch is held, then drop at its last position.
+        navigating = (
+            self.state in (EventState.HOVER, EventState.COOLDOWN)
+            and raw_gesture in ("Pointing", "Three Fingers", "Victory", "Closed Fist")
+        )
+        if navigating or (self.state == EventState.DRAGGING and is_pinching):
+            self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
 
         # ── F-06 FIX: right-click release gate ────────────────────────────────
         # Re-arm right-click only after Three Fingers gesture is released
@@ -121,47 +135,62 @@ class EventEngine:
 
         # ── State transitions ──────────────────────────────────────────────────
         if self.state == EventState.HOVER:
-            if stable_gesture == "Pinch" or raw_gesture == "Pinch":
+            if is_pinching and can_start_action and not self._pinch_consumed:
                 self.pinch_down_time = now
                 self._change_state(EventState.PINCH_DOWN)
 
-            elif stable_gesture == "Two Fingers" or raw_gesture == "Two Fingers":
-                self.scroll_start_y = lms_list[8].y if lms_list else None
+            elif is_scrolling and can_start_action:
+                y = lms_list[8].y if lms_list else float("nan")
+                self.scroll_start_y = y if math.isfinite(y) and 0.0 <= y <= 1.0 else None
                 self.scroll_accumulator = 0.0
                 self._change_state(EventState.SCROLLING)
 
-            elif (stable_gesture == "Three Fingers" or raw_gesture == "Three Fingers") and self._right_click_armed:
+            elif stable_gesture == raw_gesture == "Three Fingers" and self._right_click_armed:
                 # F-06 FIX: fire once, then require release before re-arming
                 self.mouse.mouse.click(button="right")
                 self._right_click_armed = False
                 self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.PINCH_DOWN:
-            is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
+            hold_duration = now - self.pinch_down_time
             if not is_pinching:
-                # Pinch released
-                hold_duration = now - self.pinch_down_time
-                if hold_duration < self.drag_hold_ms:
-                    # Quick release → wait for possible double-click
+                if self._second_pinch_pending and hold_duration < self.drag_hold_ms:
+                    # The second pinch began in the window and stayed short.
+                    self.mouse.mouse.double_click()
+                    self._second_pinch_pending = False
+                    self._pinch_consumed = True
+                    self._change_state(EventState.COOLDOWN)
+                else:
+                    if self._second_pinch_pending:
+                        # The second pinch lasted too long for a double click,
+                        # but no held sample began a drag before this release.
+                        self.mouse.mouse.click(button="left")
+                        self._second_pinch_pending = False
+                    # No button was pressed while still in PINCH_DOWN. A release
+                    # first observed after the hold deadline must not swallow
+                    # the click; only a held sample can start an actual drag.
                     self.pinch_release_time = now
                     self._change_state(EventState.PINCH_RELEASE_WAIT)
-                else:
-                    # Was dragging (or hold elapsed) — release
-                    self.mouse.mouse.drag(start=False)
-                    self._change_state(EventState.COOLDOWN)
             else:
-                hold_duration = now - self.pinch_down_time
                 if hold_duration >= self.drag_hold_ms:
+                    if self._second_pinch_pending:
+                        # The second pinch started in the double-click window,
+                        # then became a hold. Complete the first click before
+                        # beginning the drag.
+                        self.mouse.mouse.click(button="left")
+                        self._second_pinch_pending = False
                     self.mouse.mouse.drag(start=True)
                     self._change_state(EventState.DRAGGING)
+                    self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
 
         elif self.state == EventState.PINCH_RELEASE_WAIT:
-            is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
-            if is_pinching:
+            if is_pinching and can_start_action:
                 if now - self.pinch_release_time <= self.double_click_window_ms:
-                    # Second pinch within double-click window
-                    self.mouse.mouse.double_click()
-                    self._change_state(EventState.COOLDOWN)
+                    # Wait for the second release to distinguish a short pinch
+                    # from a hold that should become a drag.
+                    self._second_pinch_pending = True
+                    self.pinch_down_time = now
+                    self._change_state(EventState.PINCH_DOWN)
                 else:
                     # The first click expired. Commit it and treat this as a
                     # fresh pinch so it can become its own click or drag.
@@ -174,31 +203,32 @@ class EventEngine:
                 self._change_state(EventState.HOVER)
 
         elif self.state == EventState.DRAGGING:
-            is_pinching = (stable_gesture == "Pinch" or raw_gesture == "Pinch")
             if not is_pinching:
                 self.mouse.mouse.drag(start=False)
                 self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.SCROLLING:
-            is_scrolling = (stable_gesture == "Two Fingers" or raw_gesture == "Two Fingers")
             if not is_scrolling:
                 self.scroll_start_y = None
                 self.scroll_accumulator = 0.0
                 self._change_state(EventState.HOVER)
-            elif lms_list and self.scroll_start_y is not None:
+            elif lms_list:
                 current_y = lms_list[8].y
-                dy = (current_y - self.scroll_start_y) * scale_factor
-
-                self.scroll_accumulator += dy
-                scroll_threshold = 0.03
-
-                while self.scroll_accumulator > scroll_threshold:
-                    self.mouse.mouse.scroll(-1)
-                    self.scroll_accumulator -= scroll_threshold
-                while self.scroll_accumulator < -scroll_threshold:
-                    self.mouse.mouse.scroll(1)
-                    self.scroll_accumulator += scroll_threshold
-
+                if not math.isfinite(current_y) or not 0.0 <= current_y <= 1.0:
+                    self.scroll_start_y = None
+                    self.scroll_accumulator = 0.0
+                    return
+                if self.scroll_start_y is not None:
+                    scale = scale_factor if math.isfinite(scale_factor) and scale_factor > 0 else 1.0
+                    scale = min(4.0, max(0.25, scale))
+                    self.scroll_accumulator += (current_y - self.scroll_start_y) * scale
+                    scroll_threshold = 0.03
+                    ticks = math.trunc(self.scroll_accumulator / scroll_threshold)
+                    if ticks:
+                        # One bounded Windows event per frame. Discard excess
+                        # whole ticks so an outlier cannot queue future scroll.
+                        self.mouse.mouse.scroll(-max(-3, min(3, ticks)))
+                        self.scroll_accumulator -= ticks * scroll_threshold
                 self.scroll_start_y = current_y
 
         elif self.state == EventState.COOLDOWN:
