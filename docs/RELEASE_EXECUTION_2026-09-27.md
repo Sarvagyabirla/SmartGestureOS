@@ -185,6 +185,7 @@ change or silent log suppression was performed.
 
 Latest results: **356 passed in 6.79 seconds**. A source `main.py --self-check`
 also passed native VIDEO inference without opening a camera or GUI. The
-post-change compilation and dependency checks are to be repeated before commit.
+post-change `compileall` and `pip check` passed. The pushed changes passed
+[Windows CI](https://github.com/Sarvagyabirla/SmartGestureOS/actions/runs/36271430029).
 The CI push filter now includes `debug/**` and compiles tests/scripts as well as
 application code so these checkpoints receive automated remote validation.
