@@ -4,7 +4,7 @@
 
 ## Automated checks
 
-- Python 3.11.9: `python -m pytest tests/ -v --tb=short`: **181 passed**.
+- Python 3.11.9: `python -m pytest tests/ -v --tb=short`: **223 passed in 6.60 seconds** after the Step 2 mouse fixes and diagnostic checks.
 - `python -m compileall -q main.py config.py src tests scripts`: passed.
 - `python -m pip check`: passed, no broken requirements.
 - RGB skeleton drawing is covered with deterministic red and green color-phase
@@ -61,6 +61,25 @@ this machine during the tracking check. Volume behavior still needs separate
 investigation and validation.
 
 ## Manual checks still needed
+
+### Step 2 mouse controls
+
+The automated input checks cover raw pinch release despite a stale stable label,
+double-pinch consumption, click target stability, bounded scroll, uncalibrated
+hand-size scaling, and cursor history reset. Automated fixtures now keep Windows
+mouse input mocked throughout each test, including pause and shutdown paths.
+
+The opt-in guided check is documented in [MOUSE_HARDWARE_CHECK.md](MOUSE_HARDWARE_CHECK.md).
+It uses the real production pipeline with cursor input confined to its canvas,
+starts paused, and records human observations without saving webcam images.
+
+One guided session ran on 2026-09-26 from 23:51:48 to 23:52:01 local time.
+It detected a real hand with 21 landmarks but remained paused throughout.
+The local report recorded all six mouse interactions as `not_recorded`, with
+no Windows input receipts. Therefore **Step 2 remains PARTIAL**, and no physical
+mouse-control pass is claimed. The application, camera and hotkey shut down.
+
+### Remaining release checks
 
 - Present each gesture deliberately and verify the expected action in all three
   modes with a person operating the app.
