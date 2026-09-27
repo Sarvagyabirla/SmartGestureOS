@@ -62,14 +62,21 @@ The application writes the following files on your device:
 
 | What | Where | Why |
 |------|-------|-----|
-| Application profiles (JSON) | `%LOCALAPPDATA%\SmartGesture\profiles\<name>.json` | Remember your preferences |
-| Custom gesture models (JSON) | `%LOCALAPPDATA%\SmartGesture\custom_gestures\custom_gestures.json` | Store gestures you trained |
-| Screenshots (PNG) | `%LOCALAPPDATA%\SmartGesture\screenshots\` | Saved when you use the screenshot action |
-| Drawings (PNG) | `%LOCALAPPDATA%\SmartGesture\drawings\` | Saved when you use save-drawing in Draw mode |
-| Log files | `%LOCALAPPDATA%\SmartGesture\logs\smart_gesture_os.log` | Local debugging |
+| Application profiles (JSON) | `%LOCALAPPDATA%\SmartGestureOS\profiles\<name>.json` | Remember your preferences |
+| Custom gesture models (JSON) | `%LOCALAPPDATA%\SmartGestureOS\custom_gestures\custom_gestures.json` | Store gestures you trained |
+| Screenshots (PNG) | `%LOCALAPPDATA%\SmartGestureOS\screenshots\` | Saved when you use the screenshot action |
+| Drawings (PNG) | `%LOCALAPPDATA%\SmartGestureOS\drawings\` | Saved when you use save-drawing in Draw mode |
+| Log files | `%LOCALAPPDATA%\SmartGestureOS\logs\smart_gesture_os.log` | Local debugging |
 
 All of this data is stored in the standard Windows per-user app data folder.
 You can delete it at any time by removing that folder.
+
+On first use of the current version, existing data in the legacy
+`%LOCALAPPDATA%\SmartGesture\` folder is copied to `SmartGestureOS` without
+overwriting newer files. The legacy folder is retained. Deleting only the new
+folder also removes the migration marker, so the old data can be copied back on
+the next launch. To permanently remove all application data, close the app and
+remove both the current `SmartGestureOS` and legacy `SmartGesture` folders.
 
 ---
 

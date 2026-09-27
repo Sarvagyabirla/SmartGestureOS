@@ -100,7 +100,7 @@ def make_loop(monkeypatch):
                 return None
             return object()
 
-        def route(hands, stable, raw, frame):
+        def route(hands, stable, raw, frame, *, render_canvas=True):
             if current.step.route_error:
                 raise RuntimeError("Simulated mapper failure")
             return frame, None, 0.0
@@ -248,6 +248,96 @@ def test_skipped_inference_does_not_route_the_previous_result_again(make_loop):
     app.classifier.classify.assert_called_once_with(hand)
     app.mapper.process.assert_called_once()
     assert app.detector.draw_landmarks.call_count == 3
+
+
+@pytest.mark.parametrize("paused,lose_hand", [(False, False), (True, False), (False, True)])
+def test_draw_artwork_persists_between_inferences_while_paused_and_after_hand_loss(
+    make_loop, monkeypatch, paused, lose_hand,
+):
+    from src.drawing import DrawingCanvas
+    from src.gesture_mapper import GestureMapper
+
+    hand = hand_at()
+    app, run = make_loop([
+        FrameStep(10.0, hand), FrameStep(10.01, hand),
+        FrameStep(10.05, [] if lose_hand else hand),
+        FrameStep(10.06, [] if lose_hand else hand),
+    ], paused=paused)
+    app.mapper.mode = "DRAW"
+    app.mapper.canvas = DrawingCanvas(80, 60)
+    app.mapper.canvas.canvas[0, 0] = (255, 0, 255)
+    app.mapper.canvas.get_overlay = MagicMock(wraps=app.mapper.canvas.get_overlay)
+    app.mapper.get_sleep_gesture.return_value = None
+    monkeypatch.setattr("src.gesture_mapper.SETTINGS", {"mappings": {"DRAW": {}}})
+    # Use production DRAW routing with only the OS controllers mocked.
+    app.mapper.process.side_effect = lambda *args, **kwargs: GestureMapper.process(app.mapper, *args, **kwargs)
+
+    observations = run()
+
+    assert [item[0][0, 0].tolist() for item in observations] == [[255, 0, 255]] * 4
+    assert app.mapper.canvas.get_overlay.call_count == 4  # Exactly one composite per preview.
+    assert app.detector.process_frame.call_count == 2
+    assert app.mapper.process.call_count == (0 if paused else 2)
+    if lose_hand:
+        assert observations[-1][1] == []
+
+
+def test_pause_status_is_visible_above_retained_drawing(make_loop):
+    from src.drawing import DrawingCanvas
+
+    app, run = make_loop([FrameStep(10.0, hand_at())], paused=True)
+    app.mapper.mode = "DRAW"
+    app.mapper.canvas = DrawingCanvas(80, 60)
+    app.mapper.canvas.canvas[:] = (255, 0, 255)
+
+    frame = run()[0][0]
+
+    assert frame[0, 0].tolist() == [255, 0, 255]
+    assert np.any(np.all(frame == (0, 0, 255), axis=2))  # Red pause text above the artwork.
+    app.mapper.process.assert_not_called()
+
+
+def test_resume_does_not_treat_low_confidence_held_pose_as_neutral(make_loop):
+    app, run = make_loop([
+        FrameStep(10.0 + i * 0.05, hand_at()) for i in range(8)
+    ], paused=True)
+    app.set_automation_enabled(True)
+    # The classifier preserves its raw pose when confidence suppresses the
+    # stable result. Holding that pose has not satisfied the release gate.
+    app.classifier.classify.side_effect = lambda hands: GestureResult(
+        "Unknown", "Pinch", 40.0, 100.0, "Low confidence"
+    )
+
+    run()
+
+    assert app._rearm_state == app._REARM_WAITING
+    assert app._rearm_neutral_frames == 0
+    app.mapper.process.assert_not_called()
+
+
+def test_inference_preserves_camera_aspect_ratio(make_loop):
+    app, run = make_loop([FrameStep(10.0, hand_at())])
+
+    run()
+
+    # The scripted camera is 4:3. Stretching it to 640x360 distorts hand geometry.
+    inference_frame = app.detector.process_frame.call_args.args[0]
+    height, width = inference_frame.shape[:2]
+    assert width / height == pytest.approx(4 / 3)
+    assert max(width, height) <= 640
+
+
+def test_detector_rate_counts_fresh_inference_not_preview_frames(make_loop):
+    app, run = make_loop([
+        FrameStep(10.0, hand_at()), FrameStep(10.01, hand_at()),
+        FrameStep(10.05, hand_at()), FrameStep(10.06, hand_at()),
+        FrameStep(10.10, hand_at()),
+    ])
+
+    run()
+
+    assert app.detector_fps == pytest.approx(20.0)
+    assert app.detector.process_frame.call_count == 3
 
 
 def test_constructor_can_start_paused_without_desktop_or_camera_side_effects(monkeypatch):

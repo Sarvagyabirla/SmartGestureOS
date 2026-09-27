@@ -92,8 +92,10 @@ def validate_profile_name(name: str) -> tuple[bool, str]:
     Returns (is_valid, reason).
     Allowed: letters, numbers, spaces, underscores, hyphens, 1–64 chars.
     """
-    if not isinstance(name, str) or not name:
+    if not isinstance(name, str) or not name.strip():
         return False, "Profile name cannot be empty."
+    if name != name.strip():
+        return False, "Profile name cannot start or end with spaces."
     if not _PROFILE_NAME_PATTERN.match(name):
         return False, (
             "Profile name may only contain letters, numbers, spaces, "
@@ -120,7 +122,34 @@ class SettingsManager:
         self.callbacks: list = []
         self.last_error: str | None = None
         # Startup can recover in memory without replacing an unreadable profile.
-        self.load_profile(self.current_profile, create_missing=False)
+        self.load_profile(self._read_active_profile(), create_missing=False)
+
+    def _read_active_profile(self) -> str:
+        try:
+            name = (self.profiles_dir / ".active-profile").read_text(encoding="utf-8").strip()
+            valid, _ = validate_profile_name(name)
+            if valid and self._get_profile_path(name).is_file():
+                return name
+        except FileNotFoundError:
+            pass
+        except (OSError, UnicodeError) as exc:
+            logger.warning("Could not read active-profile preference: %s", exc)
+        return "default"
+
+    def _remember_active_profile(self) -> None:
+        path = self.profiles_dir / ".active-profile"
+        temporary = path.with_suffix(".tmp")
+        try:
+            temporary.write_text(self.current_profile, encoding="utf-8")
+            temporary.replace(path)
+        except OSError as exc:
+            # The profile itself remains safely saved if this preference fails.
+            logger.warning("Could not remember active profile for next launch: %s", exc)
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def register_callback(self, callback) -> None:
         if callback not in self.callbacks:
@@ -175,6 +204,8 @@ class SettingsManager:
                 self.settings.update(merged)
                 self.current_profile = profile_name
                 self.last_error = None
+                if create_missing:
+                    self._remember_active_profile()
                 self.apply_settings()
                 return True
             except Exception as e:
@@ -212,6 +243,7 @@ class SettingsManager:
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, indent=4, allow_nan=False)
             tmp_path.replace(path)
+            self._remember_active_profile()
             self.apply_settings()
             self.last_error = None
             return True
@@ -225,7 +257,7 @@ class SettingsManager:
             return False
 
     def delete_profile(self, profile_name: str) -> bool:
-        if profile_name == "default":
+        if isinstance(profile_name, str) and profile_name.casefold() == "default":
             return False  # Cannot delete default
 
         valid, reason = validate_profile_name(profile_name)

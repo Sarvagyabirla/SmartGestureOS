@@ -2,7 +2,12 @@
 
 This directory contains the single canonical MSIX manifest. Build the standard
 PyInstaller ONEDIR output first, then run `scripts\build_msix.ps1` from the
-repository root.
+repository root. Use `-PythonExe 'C:\path\to\python.exe'` when the Python 3.11
+environment is outside the checkout.
+
+**Store status: NOT STARTED.** The manifest still intentionally contains the
+Partner Center identity placeholders. No package or submission is claimed.
+Listing copy is prepared in [STORE_LISTING.md](STORE_LISTING.md).
 
 ## Required inputs
 
@@ -10,7 +15,7 @@ repository root.
 - `dist\SmartGestureOS\SmartGestureOS.exe` and the rest of the ONEDIR output
 - Exact package identity, publisher, and publisher display name from Partner
   Center entered in `AppxManifest.xml`
-- Real PNG files in `Assets\` with these exact dimensions:
+- Real PNG files are already provided in `Assets\` with these exact dimensions:
 
 | File | Dimensions |
 |------|------------|
@@ -26,7 +31,18 @@ identity, executable, and image files, then writes
 `dist\release\SmartGestureOS_<version>_x64.msix`. It stops with an actionable
 error when a required input is missing; it never creates placeholder artwork.
 
+The original 21-landmark hand mark is rendered by
+`scripts\generate_brand_assets.ps1` using Windows GDI+ vector primitives. That
+script regenerates all six PNGs and the multi-resolution desktop ICO without
+external artwork or image downloads. Keep the generated resources committed.
+
 The manifest requests webcam access and `runFullTrust`, as required by the
 camera-driven desktop app. Test signing is only for local sideloading. Store
 submission requires the Partner Center identity and must follow Microsoft's
 current submission and signing process.
+
+Before uploading, replace all three identity fields with the exact values from
+the Partner Center Product Identity page, build the package, test installation
+and the complete hardware checklist, and complete the listing screenshots and
+age-rating questionnaire. Microsoft performs certification after submission;
+its status must be recorded separately from a successful local build.

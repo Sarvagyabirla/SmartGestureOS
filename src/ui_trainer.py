@@ -1,5 +1,4 @@
 import customtkinter as ctk
-import time
 from .gesture_trainer import gesture_trainer
 import tkinter.messagebox as messagebox
 
@@ -7,7 +6,7 @@ class TrainerUI(ctk.CTkToplevel):
     def __init__(self, master, on_close_callback=None):
         super().__init__(master)
         
-        self.title("Smart Gesture OS - Train Custom Gesture")
+        self.title("SmartGestureOS - Train Custom Gesture")
         self.geometry("400x500")
         self.attributes("-topmost", True)
         self.on_close_callback = on_close_callback
@@ -108,12 +107,17 @@ class TrainerUI(ctk.CTkToplevel):
         else:
             self.is_recording = False
             self.record_btn.configure(state="normal")
-            if not gesture_trainer.save_models():
-                self.status_label.configure(text="Save failed. Samples remain in memory; retry saving.", text_color="red")
-                return
-            self.status_label.configure(text="Status: Saved Successfully!", text_color="green")
-            self.name_entry.delete(0, "end")
-            self.update_list()
+            self.retry_save()
+
+    def retry_save(self):
+        if not gesture_trainer.save_models():
+            self.status_label.configure(text="Save failed. Samples remain in memory; retry saving.", text_color="red")
+            self.record_btn.configure(text="Retry Save", command=self.retry_save)
+            return
+        self.status_label.configure(text="Status: Saved Successfully!", text_color="green")
+        self.record_btn.configure(text="Start Recording", command=self.start_recording)
+        self.name_entry.delete(0, "end")
+        self.update_list()
             
     def update_list(self):
         self.list_text.configure(state="normal")

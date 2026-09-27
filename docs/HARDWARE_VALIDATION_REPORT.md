@@ -2,6 +2,29 @@
 
 **Updated:** 2026-09-27
 
+## Current specification pass
+
+Current source/build evidence is in
+[PRODUCT_EXECUTION_2026-09-27.md](PRODUCT_EXECUTION_2026-09-27.md); the sections
+below retain previous runs with their original scope. Current inference
+downscaling preserves camera aspect ratio within 640 pixels rather than forcing
+every camera to 640×360. The historical audio API issue below was fixed and
+endpoint access subsequently verified, as described later in this report.
+
+The new guided mouse check ran on 27 September from **04:19:04 to 04:20:12 IST**.
+Camera 0 initialized, VIDEO inference ran, the hotkey registered, automation
+resumed/armed/paused, and camera/hotkey cleanup completed. The saved report
+`logs/mouse-validation-current-20260927-041902.json` marks cursor as
+`observed_using_hand`, with all five other results `not_recorded` and no Windows
+event receipts. Sampled tracking logs recorded zero detected hands during this
+run. These observations conflict; clarification is pending and this run is
+**not a new physical acceptance pass**. Prior confirmed cursor/landmark evidence
+is retained separately. No webcam images were saved.
+
+A native failed Clearcut uploader attempt was again logged during shutdown;
+the payload and successful transfer status were not established. Existing
+privacy disclosure remains applicable.
+
 ## Automated checks
 
 - Python 3.11.9: `python -m pytest tests/ -q --tb=short`: **356 passed in 6.79 seconds** after camera recovery, click transition and frozen startup probe corrections.

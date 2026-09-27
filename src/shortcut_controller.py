@@ -107,7 +107,7 @@ class ShortcutController:
             return self._launch_exe(exe)
         return ActionResult(
             False, "open_chrome",
-            "Chrome not found. Install it or set it in Settings.",
+            "Chrome not found. Install Google Chrome and try again.",
             "chrome.exe not found in PATH or known install dirs",
         )
 

@@ -22,10 +22,8 @@
      - If you add network features, you must also declare internet capabilities
   
   4. Visual Assets:
-     - Create all required image sizes in Assets/ folder:
-       Square44x44Logo, Square150x150Logo, Wide310x150Logo, Square310x310Logo
-     - Use the Partner Center Store logos tool or makeappx.exe
-     - All must be .png with transparent background
+     - Real PNG assets are checked into Assets/.
+     - Regenerate the original vector mark with scripts/generate_brand_assets.ps1.
   
   5. Code Signing:
      - You must have a code-signing certificate from a trusted CA OR
@@ -47,7 +45,7 @@
     <DisplayName>SmartGestureOS</DisplayName>
     <PublisherDisplayName>Your Publisher Display Name</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <Description>Control your Windows PC with hand gestures. Runs entirely locally — no cloud, no account required.</Description>
+    <Description>Control your Windows PC with webcam hand gestures. No account required.</Description>
   </Properties>
 
   <Dependencies>
@@ -79,10 +77,10 @@
   </Applications>
 
   <Capabilities>
-    <!-- REQUIRED: Camera access for hand gesture detection -->
-    <DeviceCapability Name="webcam" />
     <!-- Required for full-trust desktop app in MSIX -->
     <rescap:Capability Name="runFullTrust" />
+    <!-- Device capabilities follow general/restricted capabilities in the schema. -->
+    <DeviceCapability Name="webcam" />
   </Capabilities>
 
 </Package>

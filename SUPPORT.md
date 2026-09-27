@@ -16,7 +16,7 @@ guided by Ms. Ankita Dubey. Use the following support channels:
 
 1. Read [GESTURES.md](GESTURES.md) — make sure the gesture is supported.
 2. Check [existing issues](https://github.com/Sarvagyabirla/SmartGestureOS/issues?q=is%3Aissue).
-3. Collect your log file: `%LOCALAPPDATA%\SmartGesture\logs\smart_gesture_os.log`
+3. Collect your log file: `%LOCALAPPDATA%\SmartGestureOS\logs\smart_gesture_os.log`
 
 ## Information to Include in a Bug Report
 
@@ -36,7 +36,7 @@ Log snippet: (paste from smart_gesture_os.log)
 ## FAQ
 
 **Q: The app can't find my camera.**  
-A: Close other applications using the camera and check Windows camera permissions. For source diagnostics, the camera index is stored in the active profile under `%LOCALAPPDATA%\SmartGesture\profiles\<name>.json`; the current Settings window does not expose a camera selector.
+A: Close other applications using the camera and check Windows camera permissions. In Settings, select the camera number (0 is usually the first camera), save, then restart SmartGestureOS. Camera changes apply on restart. Profiles live under `%LOCALAPPDATA%\SmartGestureOS\profiles\<name>.json`.
 
 **Q: Gestures are detected but the mouse doesn't move.**  
 A: Check that automation is enabled, GENERAL mode is selected, and a hand is tracked. After resuming, briefly remove your hand so the neutral re-arm can complete. Settings, Trainer, and Coach pause automation when opened; use Resume when ready. The physical mouse diagnostic additionally requires its target window to have focus.

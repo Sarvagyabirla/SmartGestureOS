@@ -29,7 +29,7 @@ def test_camera_start_stop_releases_capture_and_joins_thread(mock_capture):
     camera = Camera(index=3, width=640, height=360)
     with patch("src.camera.threading.Thread") as create_thread:
         thread = create_thread.return_value
-        thread.is_alive.return_value = True
+        thread.is_alive.side_effect = [True, False]
 
         assert camera.start() is True
         assert camera.running is True
@@ -76,5 +76,6 @@ def test_capture_overwrites_old_frame_with_latest_mirrored_frame(mock_capture):
     frame, frame_id, captured_at = camera.read_with_timestamp()
     np.testing.assert_array_equal(frame, newest[:, ::-1])
     assert frame_id == 1
+    assert (camera.actual_width, camera.actual_height) == (2, 1)
     assert isinstance(captured_at, float)
     assert camera.read_with_timestamp() == (None, -1, None)

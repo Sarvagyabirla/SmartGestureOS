@@ -1,7 +1,13 @@
 # SmartGestureOS Project Validation Report
 
-**Updated:** 2026-09-26
+**Updated:** 2026-09-27
 **Application version:** 0.9.0
+
+This is an engineering status report, not a claim that all product acceptance
+criteria are complete. The [authoritative specification](docs/PRODUCT_SPECIFICATION.md),
+[subsystem audit](docs/SPECIFICATION_AUDIT.md) and
+[current execution evidence](docs/PRODUCT_EXECUTION_2026-09-27.md) record the
+full scope, prioritized ten-step plan and latest validation.
 
 ## Implemented and checked
 
@@ -21,7 +27,8 @@
 
 ## Automated results
 
-- `pytest -q tests`: **150 passed**.
+- Latest test counts and exact build artifacts are recorded in the current
+  execution evidence above; the starting baseline had **356 passing tests**.
 - `compileall` for the application and tests: passed.
 - `pip check`: no broken requirements found.
 - Canonical MSIX manifest XML and both packaging PowerShell scripts parse.
@@ -42,10 +49,10 @@ FPS. Results varied in other short runs; see
   meaningful accuracy check.
 - The UI cursor feel and RGB overlay need a person to confirm while operating
   the app.
-- The installer was not rebuilt in this pass. Inno Setup is not available on
-  this machine.
-- MSIX packaging stops until genuine visual assets and exact Partner Center
-  identity values are provided. No signed package or Store submission exists.
+- The native ONEDIR inference and UI probes now pass; installer lifecycle and
+  clean-machine physical acceptance are tracked separately in release readiness.
+- MSIX has genuine checked-in visual assets. Packaging stops until exact Partner
+  Center identity values are provided. No signed MSIX or Store submission exists.
 
 This report does not certify the project as ready for Store release. The next
 validation steps are listed in [`RELEASE_READINESS.md`](RELEASE_READINESS.md).

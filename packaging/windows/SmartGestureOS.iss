@@ -4,7 +4,7 @@
 ; Build: iscc /DAppVersion=0.9.0 packaging\windows\SmartGestureOS.iss
 
 #ifndef AppVersion
-  #define AppVersion "0.9.0-dev"
+  #error AppVersion is required. Use scripts/build_installer.ps1 to read src/version.py.
 #endif
 
 [Setup]
@@ -34,6 +34,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ; Misc
 WizardStyle=modern
+SetupIconFile=SmartGestureOS.ico
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\SmartGestureOS.exe
 
@@ -42,7 +43,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "launchafterinstall"; Description: "Launch SmartGestureOS after installation"; GroupDescription: "After installation:"; Flags: unchecked
 
 [Files]
 ; Include the entire ONEDIR output — the _internal folder and all its contents
@@ -51,10 +51,10 @@ Source: "..\..\dist\SmartGestureOS\*"; DestDir: "{app}"; Flags: ignoreversion re
 [Icons]
 Name: "{group}\SmartGestureOS"; Filename: "{app}\SmartGestureOS.exe"; Comment: "Real-Time Hand Gesture Control System"
 Name: "{group}\Uninstall SmartGestureOS"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\SmartGestureOS"; Filename: "{app}\SmartGestureOS.exe"; Tasks: desktopicon; Comment: "Real-Time Hand Gesture Control System"
+Name: "{autodesktop}\SmartGestureOS"; Filename: "{app}\SmartGestureOS.exe"; Tasks: desktopicon; Comment: "Real-Time Hand Gesture Control System"
 
 [Run]
-Filename: "{app}\SmartGestureOS.exe"; Description: "{cm:LaunchProgram,SmartGestureOS}"; Flags: nowait postinstall skipifsilent; Tasks: launchafterinstall
+Filename: "{app}\SmartGestureOS.exe"; Description: "{cm:LaunchProgram,SmartGestureOS}"; Flags: nowait postinstall skipifsilent unchecked
 
 [UninstallDelete]
 ; Remove user log files from LocalAppData on uninstall (optional — disabled by default for safety)

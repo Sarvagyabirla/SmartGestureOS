@@ -35,11 +35,14 @@ class SmartGestureApp(ctk.CTk):
             pywinstyles.apply_style(self, "mica")
         except ImportError:
             pass
+        except Exception as exc:
+            logger.warning("Optional Windows window styling unavailable: %s", exc)
         
         self.close_callback = close_callback
         self.toggle_pause_callback = toggle_pause_callback
         self.set_automation_callback = set_automation_callback
         self.automation_enabled = True
+        self.hotkey_available = True
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.grid_rowconfigure(0, weight=1)
@@ -49,9 +52,14 @@ class SmartGestureApp(ctk.CTk):
         self.trainer_window = None
         self.last_stat_update = 0
         
-        self.sidebar = ctk.CTkFrame(self, width=300, corner_radius=0, fg_color=self.card_color)
+        self.sidebar_container = ctk.CTkFrame(self, width=300, corner_radius=0, fg_color=self.card_color)
+        self.sidebar_container.grid(row=0, column=0, sticky="nsew")
+        self.sidebar_container.grid_rowconfigure(0, weight=1)
+        self.sidebar_container.grid_columnconfigure(0, weight=1)
+        # Keep the pause control visible even on small screens or at high DPI.
+        self.sidebar = ctk.CTkScrollableFrame(self.sidebar_container, width=300, corner_radius=0, fg_color=self.card_color)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(8, weight=1)
+        self.sidebar.grid_columnconfigure(0, weight=1)
         
         # Typography
         title_font = ctk.CTkFont(family="Segoe UI", size=26, weight="bold")
@@ -60,7 +68,7 @@ class SmartGestureApp(ctk.CTk):
         normal_font = ctk.CTkFont(family="Segoe UI", size=13)
         small_font = ctk.CTkFont(family="Segoe UI", size=11)
         
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="Gesture OS", font=title_font, text_color=self.accent_color)
+        self.logo_label = ctk.CTkLabel(self.sidebar, text="SmartGestureOS", font=title_font, text_color=self.accent_color)
         self.logo_label.grid(row=0, column=0, padx=24, pady=(30, 20), sticky="w")
         
         # Elevated cards for sections
@@ -88,14 +96,21 @@ class SmartGestureApp(ctk.CTk):
         # Stats panel
         self.stats_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.stats_frame.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
-        self.fps_label = ctk.CTkLabel(self.stats_frame, text="Rate: 0", font=normal_font, text_color=self.muted_text)
-        self.fps_label.pack(side="left", expand=True)
-        self.latency_label = ctk.CTkLabel(self.stats_frame, text="Input: 0ms", font=normal_font, text_color=self.muted_text)
-        self.latency_label.pack(side="left", expand=True)
+        self.stats_frame.grid_columnconfigure((0, 1), weight=1)
+        self.fps_label = ctk.CTkLabel(self.stats_frame, text="Processing: 0 fps", font=normal_font, text_color=self.muted_text)
+        self.fps_label.grid(row=0, column=0, sticky="w")
+        self.latency_label = ctk.CTkLabel(self.stats_frame, text="Input: 0 ms", font=normal_font, text_color=self.muted_text)
+        self.latency_label.grid(row=0, column=1, sticky="e")
         self.cpu_label = ctk.CTkLabel(self.stats_frame, text="CPU: 0%", font=normal_font, text_color=self.muted_text)
-        self.cpu_label.pack(side="left", expand=True)
+        self.cpu_label.grid(row=1, column=0, sticky="w")
         self.ram_label = ctk.CTkLabel(self.stats_frame, text="RAM: 0 MB", font=normal_font, text_color=self.muted_text)
-        self.ram_label.pack(side="left", expand=True)
+        self.ram_label.grid(row=1, column=1, sticky="e")
+        self.camera_fps_label = ctk.CTkLabel(self.stats_frame, text="Camera: 0 fps", font=normal_font, text_color=self.muted_text)
+        self.camera_fps_label.grid(row=2, column=0, sticky="w")
+        self.detector_fps_label = ctk.CTkLabel(self.stats_frame, text="Detector: 0 fps", font=normal_font, text_color=self.muted_text)
+        self.detector_fps_label.grid(row=2, column=1, sticky="e")
+        self.inference_label = ctk.CTkLabel(self.stats_frame, text="Inference: 0 ms", font=normal_font, text_color=self.muted_text)
+        self.inference_label.grid(row=3, column=0, columnspan=2, sticky="w")
         
         # Action Buttons
         self.btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
@@ -107,10 +122,10 @@ class SmartGestureApp(ctk.CTk):
         self.coach_btn = ctk.CTkButton(self.btn_frame, text="Gesture Coach", command=self.open_coach, fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4")
         self.coach_btn.pack(fill="x", pady=4)
         
-        self.pause_btn = ctk.CTkButton(self.btn_frame, text="Pause (Ctrl+Alt+G)", command=self.toggle_pause, fg_color="#d64545", hover_color="#b33939")
-        self.pause_btn.pack(fill="x", pady=4)
-        
-        self.sidebar.grid_rowconfigure(11, weight=1)
+        self.pause_btn = ctk.CTkButton(self.sidebar_container, text="Pause (Ctrl+Alt+G)", command=self.toggle_pause, fg_color="#d64545", hover_color="#b33939")
+        self.pause_btn.grid(row=1, column=0, padx=20, pady=(8, 4), sticky="ew")
+        self.hotkey_status_label = ctk.CTkLabel(self.sidebar_container, text="Ctrl+Alt+G pauses or resumes automation.", font=small_font, wraplength=280, text_color=self.muted_text)
+        self.hotkey_status_label.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
         
         # Status indicators
         self.camera_state_label = ctk.CTkLabel(self.sidebar, text="● CAMERA ACTIVE", font=small_font, text_color=self.accent_color)
@@ -139,6 +154,16 @@ class SmartGestureApp(ctk.CTk):
         
         self.video_label = ctk.CTkLabel(self.video_container, text="")
         self.video_label.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        self.welcome_label = ctk.CTkLabel(
+            self.main_frame,
+            text="WELCOME TO SMARTGESTUREOS\n"
+                 "Place one hand 30–50 cm from the webcam. Point to move; pinch to click.\n"
+                 "Use Call Me to change mode. Use Pause or Ctrl+Alt+G to stop automation.\n"
+                 "After resuming, lower your hand briefly before continuing.",
+            font=normal_font, text_color=self.muted_text, justify="left", wraplength=620,
+        )
+        self.welcome_label.grid(row=1, column=0, padx=10, pady=(12, 0), sticky="w")
         
         self.current_imgtk = None
         self.frame_width = 750
@@ -163,6 +188,26 @@ class SmartGestureApp(ctk.CTk):
             self.toggle_pause_callback()
         else:
             logger.warning("No toggle_pause_callback or set_automation_callback configured on UI.")
+
+    def set_hotkey_available(self, available):
+        """Show a registration failure without disabling the UI pause control."""
+        self.hotkey_available = bool(available)
+        self.hotkey_status_label.configure(
+            text=("Ctrl+Alt+G pauses or resumes automation." if available else
+                  "Ctrl+Alt+G is unavailable. Use the Pause / Resume button."),
+            text_color=self.muted_text if available else "#e38b29",
+        )
+        self.pause_btn.configure(text=self._pause_button_text())
+
+    def _pause_button_text(self):
+        label = "Pause" if self.automation_enabled else "Resume"
+        return label + (" (Ctrl+Alt+G)" if self.__dict__.get("hotkey_available", True) else "")
+
+    def update_performance(self, camera_fps, detector_fps, inference_ms):
+        """Display independently measured capture and inference performance."""
+        self.camera_fps_label.configure(text=f"Camera: {camera_fps:.1f} fps")
+        self.detector_fps_label.configure(text=f"Detector: {detector_fps:.1f} fps")
+        self.inference_label.configure(text=f"Inference: {inference_ms:.1f} ms")
 
     def _pause_for_auxiliary_ui(self):
         """Practicing/configuring gestures must not trigger desktop actions."""
@@ -236,7 +281,7 @@ class SmartGestureApp(ctk.CTk):
         import time
         current_time = time.time()
         if current_time - self.last_stat_update > 0.5:
-            self.fps_label.configure(text=f"Rate: {fps}")
+            self.fps_label.configure(text=f"Processing: {fps} fps")
             self.latency_label.configure(text=f"Input: {avg_latency}ms")
             self.cpu_label.configure(text=f"CPU: {cpu_usage:.1f}%")
             self.ram_label.configure(text=f"RAM: {ram_usage:.1f} MB")
@@ -253,13 +298,13 @@ class SmartGestureApp(ctk.CTk):
         self.automation_enabled = automation_enabled
         if not automation_enabled:
             self.automation_state_label.configure(text="● AUTOMATION PAUSED", text_color="#d64545")
-            self.pause_btn.configure(text="Resume (Ctrl+Alt+G)", fg_color="#2fa572", hover_color="#26855c")
+            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#2fa572", hover_color="#26855c")
         elif is_sleeping:
             self.automation_state_label.configure(text="● AUTOMATION SLEEPING", text_color="#d64545")
-            self.pause_btn.configure(text="Pause (Ctrl+Alt+G)", fg_color="#d64545", hover_color="#b33939")
+            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")
         else:
             self.automation_state_label.configure(text="● AUTOMATION ON", text_color=self.accent_color)
-            self.pause_btn.configure(text="Pause (Ctrl+Alt+G)", fg_color="#d64545", hover_color="#b33939")
+            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")
 
     def update_frame(self, frame):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

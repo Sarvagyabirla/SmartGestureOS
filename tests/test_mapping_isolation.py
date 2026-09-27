@@ -92,6 +92,34 @@ def test_general_mode_does_not_have_play_pause():
         "play_pause should only be a MEDIA action"
 
 
+def test_missing_browser_explanation_reaches_action_feedback():
+    from src.shortcut_controller import ShortcutController
+
+    mapper = _make_mapper()
+    controller = ShortcutController()
+    mapper.action_registry["open_chrome"]["func"] = controller.open_chrome
+    with patch.object(controller, "_find_exe", return_value=None):
+        result = mapper.execute_action("open_chrome")
+
+    assert result.startswith("Failed: open_chrome")
+    assert "Chrome not found" in result
+    mapper.feedback.speak.assert_not_called()
+
+
+def test_missing_audio_endpoint_explanation_reaches_action_feedback():
+    from src.volume_controller import VolumeController
+
+    mapper = _make_mapper()
+    controller = VolumeController()
+    mapper.action_registry["volume_up"]["func"] = controller.volume_up
+    with patch.object(controller, "_try_reacquire", return_value=False):
+        result = mapper.execute_action("volume_up")
+
+    assert result.startswith("Failed: volume_up")
+    assert "no audio endpoint" in result
+    mapper.feedback.speak.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Three Fingers isolation
 # ---------------------------------------------------------------------------
@@ -205,14 +233,9 @@ def test_drawing_save_uses_localappdata(tmp_path):
     fake_dir = tmp_path / "drawings"
     fake_dir.mkdir()
 
-    # imwrite returns True AND we make the file exist
-    def _fake_imwrite(path, img):
-        Path(path).write_bytes(b"PNG")
-        return True
-
-    with patch.object(paths_mod, "DRAWINGS_DIR", fake_dir), \
-         patch("cv2.imwrite", side_effect=_fake_imwrite):
+    with patch.object(paths_mod, "DRAWINGS_DIR", fake_dir):
         result = canvas.save_image()
 
     assert result.success is True
     assert result.action == "save_drawing"
+    assert next(fake_dir.glob("*.png")).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
