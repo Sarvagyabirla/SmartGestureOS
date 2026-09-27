@@ -51,6 +51,11 @@ class MainApp:
             close_callback=self.stop_system,
             toggle_pause_callback=self.toggle_automation,
             set_automation_callback=self.set_automation_enabled,
+            # Match UI initial state to authoritative backend: production starts
+            # PAUSED, so start_paused=True → initial_automation_enabled=False.
+            # This prevents toggle_pause() from computing (not True) = False
+            # before the first dashboard frame arrives (the P0 Resume bug).
+            initial_automation_enabled=not start_paused,
         )
 
         # Pipeline state
@@ -387,7 +392,7 @@ class MainApp:
                     latest_stable_gesture, latest_raw_gesture, latest_confidence,
                     latest_action, fps, self.cpu_usage, self.ram_usage,
                     connected, self.mapper.is_sleeping, avg_latency,
-                    self.automation_enabled,
+                    self.automation_enabled, self._rearm_state == self._REARM_WAITING,
                 ))
             except (queue.Empty, queue.Full):
                 pass
@@ -622,10 +627,13 @@ class MainApp:
                 cv2.putText(frame, "WAITING FOR FRESH TRACKING...", (30, self.camera.height // 2),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 self.ui.current_hands_data = []
+                with self._automation_lock:
+                    _is_resuming = self._rearm_state == self._REARM_WAITING
                 self.ui.update_dashboard(
                     self.mapper.mode, "Unknown", "Unknown", 0, None, 0,
                     self.cpu_usage, self.ram_usage, self.camera.is_connected,
                     self.mapper.is_sleeping, 0, self.automation_enabled,
+                    is_resuming=_is_resuming,
                 )
                 self.ui.update_frame(frame)
             if not self.frame_queue.empty():
@@ -633,12 +641,14 @@ class MainApp:
                     frame, hands_data, mode, stable_gesture, raw_gesture,
                     confidence, action, fps, cpu_usage, ram_usage,
                     camera_on, is_sleeping, avg_latency, automation_enabled,
+                    is_resuming,
                 ) = self.frame_queue.get_nowait()
                 self.ui.current_hands_data = hands_data
                 self.ui.update_dashboard(
                     mode, stable_gesture, raw_gesture, confidence,
                     action, fps, cpu_usage, ram_usage,
                     camera_on, is_sleeping, avg_latency, automation_enabled,
+                    is_resuming=is_resuming,
                 )
                 self.ui.update_frame(frame)
                 now = time.perf_counter()

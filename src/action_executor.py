@@ -205,10 +205,16 @@ class ActionExecutor:
                 logger.exception("ActionExecutor result callback failed.")
 
     def _drain(self) -> int:
+        """Remove all items currently in the queue.
+
+        Calls task_done() for every item removed so Queue.join() accounting
+        stays consistent — the sentinel path in _worker also calls task_done().
+        """
         dropped = 0
         while True:
             try:
                 self._queue.get_nowait()
+                self._queue.task_done()
             except queue.Empty:
                 return dropped
             dropped += 1

@@ -10,7 +10,8 @@ from src.logger import logger
 warnings.filterwarnings("ignore", message=".*Given image is not CTkImage.*")
 
 class SmartGestureApp(ctk.CTk):
-    def __init__(self, close_callback=None, toggle_pause_callback=None, set_automation_callback=None):
+    def __init__(self, close_callback=None, toggle_pause_callback=None,
+                 set_automation_callback=None, initial_automation_enabled=False):
         super().__init__()
         
         self.title("SmartGestureOS")
@@ -41,7 +42,13 @@ class SmartGestureApp(ctk.CTk):
         self.close_callback = close_callback
         self.toggle_pause_callback = toggle_pause_callback
         self.set_automation_callback = set_automation_callback
-        self.automation_enabled = True
+        # IMPORTANT: initialise to match the authoritative backend state, NOT True.
+        # Production starts PAUSED, so this must default to False.
+        # A stale True here causes toggle_pause() to compute (not True) = False
+        # and send set_automation_enabled(False) to a backend already paused,
+        # silently doing nothing (the P0 Resume-does-nothing bug).
+        self.automation_enabled = bool(initial_automation_enabled)
+        self._is_resuming = False  # True while waiting for neutral re-arm
         self.hotkey_available = True
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
@@ -210,12 +217,19 @@ class SmartGestureApp(ctk.CTk):
         self.inference_label.configure(text=f"Inference: {inference_ms:.1f} ms")
 
     def _pause_for_auxiliary_ui(self):
-        """Practicing/configuring gestures must not trigger desktop actions."""
+        """Practicing/configuring gestures must not trigger desktop actions.
+
+        Calls the authoritative backend callback only — does NOT locally mutate
+        ``automation_enabled`` because the UI cache must only be updated by the
+        backend via ``update_dashboard``.  Double-calling the callback is safe
+        because ``set_automation_enabled`` is idempotent when already paused.
+        """
         if self.set_automation_callback is not None:
             self.set_automation_callback(False)
         elif self.toggle_pause_callback is not None and self.automation_enabled:
             self.toggle_pause_callback()
-        self.automation_enabled = False
+        # Do NOT set self.automation_enabled = False here.
+        # The next update_dashboard call will reflect the true backend state.
 
     def open_coach(self):
         self._pause_for_auxiliary_ui()
@@ -248,7 +262,15 @@ class SmartGestureApp(ctk.CTk):
         self.history_textbox.insert("0.0", "\n".join(reversed(self.action_history)))
         self.history_textbox.configure(state="disabled")
         
-    def update_dashboard(self, mode, stable_gesture, raw_gesture, confidence, action, fps, cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False, avg_latency=0, automation_enabled=True):
+    def update_dashboard(self, mode, stable_gesture, raw_gesture, confidence, action, fps,
+                         cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False,
+                         avg_latency=0, automation_enabled=True, is_resuming=False):
+        """Refresh all dashboard widgets from the authoritative backend state.
+
+        ``is_resuming`` is True while the backend is in REARM_WAITING state:
+        automation is logically on but actions are blocked until the user
+        removes their hand briefly.  This must display as a distinct state.
+        """
         # Dynamic mode colors
         mode_colors = {
             "GENERAL": "#3a7ebf", # Blue
@@ -294,11 +316,19 @@ class SmartGestureApp(ctk.CTk):
             self.camera_state_label.configure(text="● CAMERA ACTIVE", text_color=self.accent_color)
         else:
             self.camera_state_label.configure(text="● CAMERA DISCONNECTED", text_color="#d64545")
-            
+
+        # Update the UI cache ONLY from the authoritative backend value.
         self.automation_enabled = automation_enabled
+        self._is_resuming = is_resuming
         if not automation_enabled:
             self.automation_state_label.configure(text="● AUTOMATION PAUSED", text_color="#d64545")
             self.pause_btn.configure(text=self._pause_button_text(), fg_color="#2fa572", hover_color="#26855c")
+        elif is_resuming:
+            # Distinct RESUMING state: automation enabled but awaiting neutral
+            self.automation_state_label.configure(
+                text="● RESUMING — LOWER HAND BRIEFLY", text_color="#e38b29"
+            )
+            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")
         elif is_sleeping:
             self.automation_state_label.configure(text="● AUTOMATION SLEEPING", text_color="#d64545")
             self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")

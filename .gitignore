@@ -49,3 +49,10 @@ benchmarks/
 # OS files
 .DS_Store
 Thumbs.db
+
+# User-generated custom gesture training data — must not be committed.
+# The shipped models/custom_gestures.json is always an empty seed {}.
+# Actual user recordings live in %LOCALAPPDATA%\SmartGestureOS\custom_gestures\.
+# If you record samples locally and want to inspect them, do so via GestureTrainer,
+# not by committing the file. Reset with: echo {} > models\custom_gestures.json
+/models/custom_gestures_local_*.json
