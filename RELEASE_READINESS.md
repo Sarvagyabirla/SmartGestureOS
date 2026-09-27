@@ -2,8 +2,10 @@
 
 ## Current status
 
-Updated 27 September 2026: **356 automated tests pass**; source runtime fixes
-are recorded in [the current execution report](docs/RELEASE_EXECUTION_2026-09-27.md).
+Updated 28 September 2026: **493 automated tests pass** (0 failures).
+The P0 Resume-does-nothing bug has been fixed and covered by 26 new regression
+tests. Source runtime fixes are recorded in
+[the current execution report](docs/RELEASE_EXECUTION_2026-09-27.md).
 Core mouse and full-feature physical acceptance remain pending. MediaPipe's
 published privacy notice says its Tasks APIs send performance and usage metrics
 to Google; a native uploader attempt was also observed. See [PRIVACY.md](PRIVACY.md)
