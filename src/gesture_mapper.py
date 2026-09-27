@@ -195,7 +195,7 @@ class GestureMapper:
                         f"Action '{action_name}' returned failure: {res.message}"
                         + (f" ({res.error})" if res.error else "")
                     )
-                    return f"Failed: {action_name}"
+                    return f"Failed: {action_name} — {res.message}" if res.message else f"Failed: {action_name}"
             else:
                 # Legacy: callable returned None / no result object
                 self.feedback.speak(action_name.replace("_", " "))
@@ -253,6 +253,8 @@ class GestureMapper:
         stable_gesture: str,
         raw_gesture: str,
         frame,
+        *,
+        render_canvas: bool = True,
     ) -> tuple:
         import cv2
         action = None
@@ -324,7 +326,8 @@ class GestureMapper:
             if not draw_mode:
                 cv2.circle(frame, (sx, sy), 8, self.canvas.color, 2)
 
-            frame = self.canvas.get_overlay(frame)
+            if render_canvas:
+                frame = self.canvas.get_overlay(frame)
 
         # ── Discrete actions ──────────────────────────────────────────────────
         if not gesture_confirmed:

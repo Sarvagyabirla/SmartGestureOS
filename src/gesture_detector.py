@@ -191,12 +191,19 @@ class GestureDetector:
                     ))
                 
                 score = 0
-                if results.handedness and i < len(results.handedness):
-                    score = results.handedness[i][0].score * 100
+                handedness = None
+                categories = getattr(results, "handedness", None)
+                if categories and i < len(categories) and categories[i]:
+                    category = categories[i][0]
+                    score = category.score * 100
+                    label = getattr(category, "category_name", None)
+                    if isinstance(label, str) and label:
+                        handedness = label
                     
                 hands_data.append({
                     "landmarks": lms_list,
-                    "score": int(score)
+                    "score": int(score),
+                    "handedness": handedness,
                 })
         return hands_data
         

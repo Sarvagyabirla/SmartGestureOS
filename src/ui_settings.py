@@ -57,7 +57,7 @@ class SettingsUI(ctk.CTkToplevel):
     def __init__(self, master, on_close_callback=None):
         super().__init__(master)
         
-        self.title("Smart Gesture OS - Settings")
+        self.title("SmartGestureOS - Settings")
         self.geometry("600x500")
         self.attributes("-topmost", True)
         self.on_close_callback = on_close_callback
@@ -103,7 +103,7 @@ class SettingsUI(ctk.CTkToplevel):
         self.add_profile_btn = ctk.CTkButton(self.profile_frame, text="Add", width=60, command=self.add_profile)
         self.add_profile_btn.grid(row=0, column=3, padx=10, pady=10)
         
-        self.calibrate_btn = ctk.CTkButton(self.profile_frame, text="Calibrate Camera", fg_color=self.bg_color, hover_color="#333333", text_color=self.accent_color, command=self.open_calibration)
+        self.calibrate_btn = ctk.CTkButton(self.profile_frame, text="Calibrate Hand Size", fg_color=self.bg_color, hover_color="#333333", text_color=self.accent_color, command=self.open_calibration)
         self.calibrate_btn.grid(row=1, column=0, columnspan=4, pady=(0, 10))
         
         # Tab View for organized settings
@@ -111,9 +111,11 @@ class SettingsUI(ctk.CTkToplevel):
         self.tabview.grid(row=1, column=0, padx=20, pady=10, sticky="nsew")
         
         self.tab_sensitivity = self.tabview.add("Sensitivity")
+        self.tab_camera = self.tabview.add("Camera")
         self.tab_mappings = self.tabview.add("Mappings")
         
         self.build_sensitivity_tab()
+        self.build_camera_tab()
         self.build_mappings_tab()
         
         # Save Button
@@ -161,6 +163,19 @@ class SettingsUI(ctk.CTkToplevel):
         self.call_me_dropdown = ctk.CTkOptionMenu(self.tab_mappings, values=actions, variable=self.call_me_var)
         self.call_me_dropdown.grid(row=1, column=1, padx=10, pady=15, sticky="ew")
 
+    def build_camera_tab(self):
+        self.tab_camera.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(self.tab_camera, text="Camera number:").grid(row=0, column=0, padx=10, pady=15, sticky="w")
+        self.camera_index_var = ctk.StringVar(value=str(settings_manager.settings["camera"]["index"]))
+        self.camera_index_entry = ctk.CTkEntry(self.tab_camera, textvariable=self.camera_index_var)
+        self.camera_index_entry.grid(row=0, column=1, padx=10, pady=15, sticky="ew")
+        ctk.CTkLabel(
+            self.tab_camera,
+            text="0 selects the default webcam. If you have several cameras, try 1 or 2.\n"
+                 "Save your settings, then restart SmartGestureOS to use the selected camera.",
+            wraplength=460, justify="left",
+        ).grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+
     def on_profile_change(self, selected_profile):
         if not settings_manager.load_profile(selected_profile):
             self.profile_var.set(settings_manager.current_profile)
@@ -171,6 +186,7 @@ class SettingsUI(ctk.CTkToplevel):
         self.smoothing_slider.set(settings_manager.settings["gestures"].get("smoothing", 2))
         self.hold_slider.set(settings_manager.settings["gestures"].get("hold_time_ms", 300))
         self.cooldown_slider.set(settings_manager.settings["gestures"].get("cooldown_ms", 400))
+        self.camera_index_var.set(str(settings_manager.settings["camera"]["index"]))
         
         general = settings_manager.settings["mappings"].get("GENERAL", {})
         self.rock_on_var.set(general.get("Rock On", "None"))
@@ -188,7 +204,15 @@ class SettingsUI(ctk.CTkToplevel):
             self.on_profile_change(new_name)
             
     def apply_settings(self):
+        try:
+            camera_index = int(self.camera_index_var.get().strip())
+            if not 0 <= camera_index <= 255:
+                raise ValueError
+        except (TypeError, ValueError):
+            messagebox.showerror("Invalid camera", "Enter a whole camera number from 0 to 255.")
+            return False
         previous = deepcopy(settings_manager.settings)
+        settings_manager.settings["camera"]["index"] = camera_index
         settings_manager.settings["gestures"]["sensitivity"] = float(self.sensitivity_slider.get())
         settings_manager.settings["gestures"]["smoothing"] = int(self.smoothing_slider.get())
         settings_manager.settings["gestures"]["hold_time_ms"] = int(self.hold_slider.get())

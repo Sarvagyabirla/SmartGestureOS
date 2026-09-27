@@ -4,7 +4,12 @@ This document lists the direct production dependencies pinned in
 `requirements.txt`, checked on 27 September 2026 against installed package
 versions and license files. Their licenses are reproduced or linked below.
 Transitive dependencies and bundled native components also carry license
-notices; the finished distribution must include those notices.
+notices. `scripts/build_notices.py` collects the installed runtime dependency
+metadata and license/notice files, including OpenCV's third-party notices and
+the Python/Tk license texts, into the ONEDIR bundle. These appear under
+`_internal/licenses` and the copied package metadata directories. Preserving
+wheel-supplied notices is not a claim that every native redistribution
+obligation has been independently reviewed.
 
 ## Dependency network behavior
 

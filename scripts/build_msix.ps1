@@ -1,3 +1,5 @@
+param([string]$PythonExe)
+
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -5,28 +7,21 @@ $distDir = Join-Path $repoRoot "dist"
 $appDir = Join-Path $distDir "SmartGestureOS"
 $manifestSource = Join-Path $repoRoot "packaging\windows\msix\AppxManifest.xml"
 $assetsDir = Join-Path $repoRoot "packaging\windows\msix\Assets"
-$pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path $pythonExe)) { $pythonExe = "python" }
+. (Join-Path $PSScriptRoot 'build_common.ps1')
+$pythonExe = Resolve-BuildPython -PythonExe $PythonExe -RepoRoot $repoRoot
 
 if (-not (Test-Path (Join-Path $appDir "SmartGestureOS.exe"))) {
     throw "PyInstaller ONEDIR output is missing. Build it first with scripts\build_windows.ps1."
 }
 if (-not (Test-Path $manifestSource)) { throw "Canonical MSIX manifest is missing: $manifestSource" }
 
-Push-Location -LiteralPath $repoRoot
-try {
-    $versionLine = & $pythonExe -c "from src.version import __version__; print(__version__)"
-} finally {
-    Pop-Location
-}
-if ($LASTEXITCODE -ne 0 -or $versionLine -notmatch '^\d+\.\d+\.\d+$') {
-    throw "Could not read a three-part version from src\version.py."
-}
+$versionLine = Get-BuildVersion -PythonExe $pythonExe -RepoRoot $repoRoot
 $version = "$versionLine.0"
 
-[xml]$manifest = Get-Content -LiteralPath $manifestSource -Raw
+[xml]$manifest = Get-Content -LiteralPath $manifestSource -Raw -Encoding UTF8
 $identity = $manifest.Package.Identity
-if ($identity.Name -match '^YOUR_' -or $identity.Publisher -match '^CN=YOUR_' -or
+if (-not $identity.Name -or -not $identity.Publisher -or -not $manifest.Package.Properties.PublisherDisplayName -or
+    $identity.Name -match '^YOUR_' -or $identity.Publisher -match '^CN=YOUR_' -or
     $manifest.Package.Properties.PublisherDisplayName -match '^Your Publisher') {
     throw "Replace the Identity Name, Publisher, and PublisherDisplayName with exact Partner Center values before building an MSIX."
 }
@@ -71,7 +66,14 @@ if (-not $makeAppx) { throw "MakeAppx.exe not found. Install the Windows 10/11 S
 $layoutDir = Join-Path $distDir "msix_layout"
 $releaseDir = Join-Path $distDir "release"
 $output = Join-Path $releaseDir "SmartGestureOS_${version}_x64.msix"
-if (Test-Path -LiteralPath $layoutDir) { Remove-Item -LiteralPath $layoutDir -Recurse -Force }
+if (Test-Path -LiteralPath $layoutDir) {
+    $resolvedLayout = (Resolve-Path -LiteralPath $layoutDir).Path
+    $expectedLayout = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'dist\msix_layout'))
+    if ($resolvedLayout -ne $expectedLayout -or (Get-Item -LiteralPath $layoutDir).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "Refusing to clear unexpected MSIX staging path: $resolvedLayout"
+    }
+    Remove-Item -LiteralPath $resolvedLayout -Recurse -Force
+}
 New-Item -ItemType Directory -Path $layoutDir -Force | Out-Null
 Copy-Item -Path (Join-Path $appDir "*") -Destination $layoutDir -Recurse -Force
 Copy-Item -LiteralPath $manifestSource -Destination (Join-Path $layoutDir "AppxManifest.xml")
@@ -80,7 +82,7 @@ foreach ($name in $requiredAssets.Keys) {
     Copy-Item -LiteralPath (Join-Path $assetsDir $name) -Destination (Join-Path $layoutDir "Assets\$name")
 }
 
-[xml]$stagedManifest = Get-Content -LiteralPath (Join-Path $layoutDir "AppxManifest.xml") -Raw
+[xml]$stagedManifest = Get-Content -LiteralPath (Join-Path $layoutDir "AppxManifest.xml") -Raw -Encoding UTF8
 $stagedManifest.Package.Identity.Version = $version
 $stagedManifest.Save((Join-Path $layoutDir "AppxManifest.xml"))
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null

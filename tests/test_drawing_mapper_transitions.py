@@ -88,6 +88,33 @@ def test_resize_preserves_artwork_and_ends_previous_coordinate_history():
     assert np.any(canvas.canvas[300, 300])
 
 
+def test_failed_history_resize_preserves_canvas_and_existing_history(monkeypatch):
+    canvas = DrawingCanvas(200, 200)
+    canvas.draw(20, 20)
+    original = canvas.canvas.copy()
+    original_history = [state.copy() for state in canvas.undo_stack]
+    real_resize = cv2.resize
+    calls = 0
+
+    def fail_during_history(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise cv2.error("Insufficient memory resizing history")
+        return real_resize(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "resize", fail_during_history)
+    result = canvas.resize(400, 400)
+
+    assert not result.success
+    assert (canvas.width, canvas.height) == (200, 200)
+    np.testing.assert_array_equal(canvas.canvas, original)
+    assert len(canvas.undo_stack) == len(original_history)
+    for actual, expected in zip(canvas.undo_stack, original_history):
+        np.testing.assert_array_equal(actual, expected)
+    assert canvas.undo().success
+
+
 def test_undo_during_stroke_starts_a_new_history_branch():
     canvas = DrawingCanvas(200, 200)
     canvas.draw(20, 20)

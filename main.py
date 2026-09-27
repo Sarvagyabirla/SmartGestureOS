@@ -89,6 +89,8 @@ class MainApp:
                 "Global shortcut unavailable; UI pause button still works."
             )
 
+        self.ui.set_hotkey_available(self._hotkey_handle is not None)
+
         if start_paused:
             self._invalidate_tracking()
             logger.info("Starting with automation PAUSED; live tracking remains visible.")
@@ -149,7 +151,7 @@ class MainApp:
         with self._automation_lock:
             return self._automation_enabled
 
-    def _tick_rearm(self, stable_gesture: str) -> bool:
+    def _tick_rearm(self, stable_gesture: str, raw_gesture: str | None = None) -> bool:
         """
         Returns True if automation is fully armed and actions may execute.
         Implements the re-arm guard (§7): after resume, automation stays
@@ -162,7 +164,8 @@ class MainApp:
             return False
 
         # WAITING state
-        neutral = stable_gesture in ("Unknown", "None", None, "")
+        neutral_states = ("Unknown", "None", None, "")
+        neutral = stable_gesture in neutral_states and raw_gesture in neutral_states
         if neutral:
             self._rearm_neutral_frames += 1
             logger.debug(
@@ -343,6 +346,8 @@ class MainApp:
         latest_progress = 0.0
         self.fps_history = collections.deque(maxlen=30)
         self.latency_history = collections.deque(maxlen=30)
+        detector_times = collections.deque(maxlen=30)
+        self.detector_fps = 0.0
 
         def clear_observation():
             nonlocal latest_hands_data, latest_stable_gesture, latest_raw_gesture
@@ -353,6 +358,8 @@ class MainApp:
             latest_action = None
             latest_progress = 0.0
             tracking_valid = False
+            detector_times.clear()
+            self.detector_fps = 0.0
 
         def invalidate(reason):
             nonlocal observed_generation
@@ -430,7 +437,13 @@ class MainApp:
                     has_new_result = False
                     if now - last_inference_time >= inference_interval:
                         last_inference_time = now
-                        small_frame = cv2.resize(frame, (640, 360))
+                        # Preserve hand geometry for 4:3, portrait and other
+                        # camera formats; only downscale large frames.
+                        scale = min(1.0, 640.0 / max(actual_w, actual_h))
+                        small_frame = cv2.resize(frame, (
+                            max(1, round(actual_w * scale)),
+                            max(1, round(actual_h * scale)),
+                        )) if scale < 1.0 else frame
                         results = self.detector.process_frame(small_frame, int(now * 1000))
                         with self._automation_lock:
                             if not self.running:
@@ -454,17 +467,16 @@ class MainApp:
                                 has_new_result = True
                                 last_capture_time = capture_time
                                 self._tracking_capture_time = capture_time
+                                detector_times.append(time.perf_counter())
+                                duration = detector_times[-1] - detector_times[0]
+                                self.detector_fps = (
+                                    (len(detector_times) - 1) / duration if duration > 0 else 0.0
+                                )
 
                     display_frame = frame.copy()
-                    if not self.detector.available:
-                        cv2.putText(display_frame,
-                                    f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
-                                    (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    for hand in latest_hands_data:
-                        self.detector.draw_landmarks(display_frame, hand["landmarks"])
-
                     # No action may start after pause/reset completes. Never
                     # count the same inference twice toward re-arm or a hold.
+                    routed_result = False
                     with self._automation_lock:
                         if not self.running:
                             break
@@ -474,21 +486,42 @@ class MainApp:
                             has_new_result = False
                         if not self._automation_enabled:
                             latest_action, latest_progress = "Paused", 0.0
-                            cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                         elif has_new_result:
-                            if not self._tick_rearm(latest_stable_gesture):
+                            if not self._tick_rearm(latest_stable_gesture, latest_raw_gesture):
                                 latest_action, latest_progress = "Re-arming", 0.0
-                                cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
-                                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
                             else:
                                 display_frame, latest_action, latest_progress = self.mapper.process(
                                     latest_hands_data, latest_stable_gesture,
-                                    latest_raw_gesture, display_frame,
+                                    latest_raw_gesture, display_frame, render_canvas=False,
                                 )
-                                display_frame = self.draw_overlays(
-                                    display_frame, latest_hands_data, latest_progress,
-                                )
+                                routed_result = True
+
+                        # Presentation runs for every camera frame, including
+                        # skipped inference, pause and hand loss. Routing edits
+                        # the canvas only on fresh results; composite it once.
+                        if self.mapper.mode == "DRAW":
+                            display_frame = self.mapper.canvas.get_overlay(display_frame)
+                        for hand in latest_hands_data:
+                            self.detector.draw_landmarks(display_frame, hand["landmarks"])
+                        if routed_result:
+                            display_frame = self.draw_overlays(
+                                display_frame, latest_hands_data, latest_progress,
+                            )
+                        # Feedback stays above artwork, so pausing is visible
+                        # even when the user has filled the entire canvas.
+                        if not self.detector.available:
+                            cv2.putText(display_frame,
+                                        f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
+                                        (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        if not self._automation_enabled:
+                            cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        elif self._rearm_state == self._REARM_WAITING:
+                            cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
+                                        (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+                        elif self.mapper.is_sleeping:
+                            cv2.putText(display_frame, "AUTOMATION SLEEPING", (50, 50),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
                     if has_new_result:
                         self.latency_history.append(int((time.perf_counter() - capture_time) * 1000))
@@ -511,6 +544,14 @@ class MainApp:
 
     def update_ui_loop(self) -> None:
         try:
+            with self._automation_lock:
+                captured_at = self._tracking_capture_time
+            fresh = captured_at is not None and time.perf_counter() - captured_at <= 0.25
+            self.ui.update_performance(
+                self.camera.measured_fps,
+                getattr(self, "detector_fps", 0.0) if fresh else 0.0,
+                self.detector.average_inference_latency if fresh else 0.0,
+            )
             if self._expire_tracking():
                 import numpy as np
                 frame = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)
@@ -591,6 +632,42 @@ def run_self_check() -> bool:
             detector.close()
 
 
+def run_ui_self_check() -> bool:
+    """Check bundled Tk themes/fonts and auxiliary windows without a webcam."""
+    import numpy as np
+
+    ui = None
+    try:
+        ui = SmartGestureApp(set_automation_callback=lambda enabled: None)
+        ui.withdraw()
+        ui.update_idletasks()
+        ui.set_hotkey_available(False)
+        ui.update_dashboard("GENERAL", "Unknown", "Unknown", 0, None, 0,
+                            camera_on=False, automation_enabled=False)
+        ui.update_performance(0.0, 0.0, 0.0)
+        ui.update_frame(np.zeros((480, 640, 3), dtype=np.uint8))
+        if getattr(ui, "current_imgtk", None) is None:
+            raise RuntimeError("Tk preview image could not be created")
+        for open_window, name in (
+            (ui.open_settings, "settings_window"),
+            (ui.open_coach, "coach_window"),
+            (ui.open_trainer, "trainer_window"),
+        ):
+            open_window()
+            window = getattr(ui, name)
+            window.withdraw()
+            ui.update_idletasks()
+            window.on_closing()
+        logger.info("UI self-check passed: dashboard, preview, Settings, Coach and Trainer.")
+        return True
+    except Exception:
+        logger.exception("UI self-check failed:")
+        return False
+    finally:
+        if ui is not None:
+            ui.on_closing()
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="SmartGestureOS desktop application")
@@ -598,8 +675,12 @@ if __name__ == "__main__":
                         help="Show live tracking with desktop automation initially paused")
     parser.add_argument("--self-check", action="store_true",
                         help="Check bundled model and native inference without opening the camera or UI")
+    parser.add_argument("--ui-self-check", action="store_true",
+                        help="Check dashboard and auxiliary UI resources without opening the camera")
     args = parser.parse_args()
     if args.self_check:
         raise SystemExit(0 if run_self_check() else 1)
+    if args.ui_self_check:
+        raise SystemExit(0 if run_ui_self_check() else 1)
     app = MainApp(start_paused=args.start_paused)
     app.run()

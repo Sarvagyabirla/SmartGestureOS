@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Product specification implementation — 27 September 2026
+
+- Preserve the complete user specification and map every subsystem to the
+  exact ten-step release plan, with software and hardware evidence separated.
+- Require raw and stable neutral gestures before re-arming after pause; retain
+  camera aspect ratio during inference and expose measured capture/detector rates.
+- Discard queued/in-flight camera frames after stop and retain capture ownership
+  until a native read finishes; expose observed resolution and handedness.
+- Save drawings correctly under Unicode Windows paths and resize canvas/history
+  transactionally when an allocation fails.
+- Keep Pause/Resume visible, add first-use guidance and all 14 Coach gestures,
+  expose hotkey failure, and add restart-applied camera selection.
+- Remember the selected profile, provide Trainer save retry, and migrate legacy
+  local data to `%LOCALAPPDATA%\SmartGestureOS` without deleting the originals.
+- Bundle MediaPipe native resources explicitly, preserve runtime license texts,
+  add application artwork/version metadata and a camera-free frozen UI probe.
+- Prepare the static product site and Store listing; show the installer download
+  only after a public release contains both installer and checksum.
+
+Physical acceptance, public release, Pages deployment and Store submission are
+tracked separately in `RELEASE_READINESS.md`; these changes do not establish
+that the final product is fully validated or published.
+
 ### Documentation
 - 2026-09-27: Updated privacy, security, support and website language using
   MediaPipe's published notice that Tasks APIs send performance and usage

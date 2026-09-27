@@ -10,10 +10,6 @@
   <meta property="og:image" content="assets/hero.jpg">
   <meta name="theme-color" content="#0d0d1a">
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-
   <style>
     :root {
       --bg-deep: #060610;
@@ -34,7 +30,7 @@
     body {
       background: var(--bg-deep);
       color: var(--text-primary);
-      font-family: 'Inter', sans-serif;
+      font-family: 'Segoe UI', system-ui, sans-serif;
       line-height: 1.6;
       overflow-x: hidden;
     }
@@ -191,6 +187,7 @@
 
     .hero-image img {
       width: 100%;
+      height: auto;
       display: block;
     }
 
@@ -379,7 +376,38 @@
     .delay-1 { animation-delay: 0.1s; }
     .delay-2 { animation-delay: 0.2s; }
     .delay-3 { animation-delay: 0.3s; }
+
+    [hidden] { display: none !important; }
+    a { color: var(--accent-blue); }
+    a:focus-visible { outline: 3px solid var(--accent-cyan); outline-offset: 5px; }
+    .feature-card dl { margin-top: 1rem; }
+    .feature-card dt { margin-top: 0.65rem; font-weight: 600; }
+    .feature-card dd { color: var(--text-secondary); font-size: 0.9rem; }
+    .pipeline { display: flex; gap: 0.75rem; flex-wrap: wrap; list-style: none; margin: 2rem 0; }
+    .pipeline li { padding: 0.8rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); }
+    .step-list { padding-left: 1.3rem; color: var(--text-secondary); }
+    .step-list li { margin-bottom: 0.8rem; }
+    .image-caption { padding: 0.6rem; color: var(--text-secondary); font-size: 0.8rem; }
+    section[id], div[id] { scroll-margin-top: 7rem; }
+    @media (max-width: 720px) {
+      nav { padding: 0.75rem 1rem; flex-wrap: wrap; gap: 0.7rem; }
+      .nav-links { order: 3; width: 100%; justify-content: space-between; gap: 0.5rem; }
+      .nav-links a { font-size: 0.8rem; }
+      nav .btn { padding: 0.4rem 0.75rem; }
+      .hero { padding: 10rem 1.2rem 3rem; min-height: auto; }
+      .hero h1 { letter-spacing: -1px; }
+      .hero p { font-size: 1.05rem; }
+      .section { padding: 3rem 1.2rem; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .privacy-callout { padding: 0 1.2rem 2rem; }
+      .privacy-box { padding: 1.5rem; gap: 1rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
   </style>
+  <script src="release.js" defer></script>
 </head>
 <body>
 
@@ -389,6 +417,7 @@
     <ul class="nav-links">
       <li><a href="#features">Features</a></li>
       <li><a href="#gestures">Gestures</a></li>
+      <li><a href="#modes">Modes</a></li>
       <li><a href="#privacy">Privacy</a></li>
       <li><a href="#download">Download</a></li>
     </ul>
@@ -408,12 +437,12 @@
     <p class="animate-up delay-2">
       SmartGestureOS turns your webcam into a gesture controller.
       Move the mouse, click, scroll, open apps — no touching required.
-      Hand tracking runs on your device. No account required.
+      A desktop utility for Windows, with hand tracking on your device and no account required.
     </p>
 
     <div class="hero-actions animate-up delay-3">
       <a href="https://github.com/Sarvagyabirla/SmartGestureOS#installation-from-source" class="btn btn-primary" id="download-hero-btn">
-        Get Started
+        Run From Source
       </a>
       <a href="https://github.com/Sarvagyabirla/SmartGestureOS" class="btn btn-ghost" target="_blank" rel="noopener">
         View Source
@@ -421,26 +450,27 @@
     </div>
 
     <div class="hero-image animate-up delay-3">
-      <img src="assets/hero.jpg" alt="SmartGestureOS hand landmark detection and Windows gesture control" loading="lazy">
+      <img src="assets/hero.jpg" alt="Concept illustration of hand landmarks controlling a Windows desktop" width="1376" height="768" loading="lazy">
+      <div class="image-caption">Concept illustration. The application shows your live camera feed and 21 hand landmarks.</div>
     </div>
   </section>
 
   <!-- Features -->
   <section class="section" id="features">
     <p class="section-label">Capabilities</p>
-    <h2>Everything You Need to Go Hands-Free</h2>
-    <p>SmartGestureOS integrates deeply with Windows without requiring any special hardware or drivers.</p>
+    <h2>A New Way to Interact With Windows</h2>
+    <p>Explore touchless interaction using a normal webcam. SmartGestureOS adds another way to control your PC alongside your mouse and keyboard.</p>
 
     <div class="feature-grid">
       <div class="feature-card">
         <span class="feature-icon">🖱️</span>
         <h3>Mouse Control</h3>
-        <p>Index finger controls the cursor with 1€ filter smoothing. Pinch to click, hold to drag, two-finger scroll.</p>
+        <p>Point to move a smoothed cursor. Pinch to click, pinch twice to double-click, hold to drag, and use two fingers to scroll.</p>
       </div>
       <div class="feature-card">
         <span class="feature-icon">📻</span>
         <h3>Media Mode</h3>
-        <p>Play/pause, skip tracks, and mute — all without touching your keyboard. Snap into Media mode instantly.</p>
+        <p>Play/pause, skip tracks, and mute. Switch to MEDIA using the Call Me gesture.</p>
       </div>
       <div class="feature-card">
         <span class="feature-icon">🎨</span>
@@ -454,8 +484,8 @@
       </div>
       <div class="feature-card">
         <span class="feature-icon">🧠</span>
-        <h3>Custom Gesture Trainer</h3>
-        <p>Train and save your own gesture samples in the Trainer window.</p>
+        <h3>Learn and Personalize</h3>
+        <p>Use Gesture Coach to learn the built-in poses. The experimental Trainer lets you save your own gesture samples.</p>
       </div>
       <div class="feature-card">
         <span class="feature-icon">🔒</span>
@@ -469,7 +499,7 @@
   <section class="section" id="gestures">
     <p class="section-label">Gesture Library</p>
     <h2>14 Built-In Gesture Poses</h2>
-    <p>Each mode has its own gesture set. Switch modes using the Call Me gesture.</p>
+    <p>These are the default GENERAL mappings. Two Fingers keeps the index and middle fingers together; Victory spreads them apart. Use Call Me to cycle GENERAL → MEDIA → DRAW.</p>
 
     <div class="gesture-grid">
       <div class="gesture-item">
@@ -480,7 +510,7 @@
       <div class="gesture-item">
         <span class="gesture-emoji">🤏</span>
         <span class="gesture-name">Pinch</span>
-        <span class="gesture-action">Click / Drag</span>
+        <span class="gesture-action">Click / Double-click / Drag</span>
       </div>
       <div class="gesture-item">
         <span class="gesture-emoji">✌️</span>
@@ -545,6 +575,68 @@
     </div>
   </section>
 
+  <section class="section" id="modes">
+    <p class="section-label">Three Modes</p>
+    <h2>The Same Gestures, Different Tasks</h2>
+    <p>The dashboard always shows the active mode. Use Call Me to switch, then release the gesture before continuing.</p>
+    <div class="feature-grid">
+      <article class="feature-card">
+        <h3>GENERAL · Desktop control</h3>
+        <p>Use the mappings above for everyday Windows actions, including mouse control, volume, brightness, screenshots, apps, and desktop shortcuts.</p>
+        <dl><dt>Short Pinch / Two fast Pinches</dt><dd>Left click / Double-click</dd>
+          <dt>Pinch and Hold / Release</dt><dd>Drag / Drop</dd>
+          <dt>Three Fingers</dt><dd>Right-click once per activation</dd></dl>
+      </article>
+      <article class="feature-card">
+        <h3>MEDIA · Playback control</h3>
+        <dl><dt>Pinch</dt><dd>Play / Pause</dd><dt>Victory</dt><dd>Next track</dd>
+          <dt>Three Fingers</dt><dd>Previous track</dd><dt>Closed Fist</dt><dd>Mute</dd>
+          <dt>Call Me</dt><dd>Switch mode</dd></dl>
+      </article>
+      <article class="feature-card">
+        <h3>DRAW · Air drawing</h3>
+        <dl><dt>Pointing / Open Palm</dt><dd>Draw / Hover</dd><dt>Victory / Three Fingers</dt><dd>Undo / Redo</dd>
+          <dt>Four Fingers</dt><dd>Save drawing</dd><dt>Thumb Up / Thumb Down</dt><dd>Cycle color / Toggle eraser</dd>
+          <dt>Closed Fist / Call Me</dt><dd>Clear canvas / Switch mode</dd></dl>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="how-it-works">
+    <p class="section-label">How It Works</p>
+    <h2>From Your Hand to a Windows Action</h2>
+    <p>A computer-vision and human-computer interaction project. SmartGestureOS runs on Windows; it is not a separate operating system or a certified accessibility or medical solution.</p>
+    <ol class="pipeline" aria-label="Gesture processing pipeline">
+      <li>Webcam frame</li><li>MediaPipe · 21 landmarks</li><li>Raw and stable gesture</li>
+      <li>Mode mapping</li><li>Timed interaction</li><li>Windows action</li>
+    </ol>
+    <p>The camera, detector, classifier, mapper, event engine, controllers, and interface each have a separate role. The dashboard shows the preview, landmarks, gestures, confidence, mode, automation state, recent actions, and performance.</p>
+  </section>
+
+  <section class="section" id="requirements">
+    <p class="section-label">Getting Started</p>
+    <h2>A Windows PC and a Webcam</h2>
+    <div class="feature-grid">
+      <article class="feature-card">
+        <h3>System requirements</h3>
+        <p>Windows 10 or Windows 11, 64-bit, with a working webcam and camera access enabled for desktop apps. Keep one hand clearly visible with even lighting.</p>
+        <p>Chrome and VS Code must already be installed for their launch gestures. Brightness support depends on your display. Performance varies by camera and PC.</p>
+      </article>
+      <article class="feature-card">
+        <h3>Your first session</h3>
+        <ol class="step-list"><li>Launch SmartGestureOS and select your camera in Settings if needed.</li>
+          <li>Place one hand in view and check that the 21 landmarks follow it.</li>
+          <li>Open Gesture Coach, then try Pointing and a short Pinch.</li>
+          <li>Use Call Me to explore MEDIA and DRAW.</li></ol>
+      </article>
+      <article class="feature-card">
+        <h3>Pause whenever you need</h3>
+        <p>Press <strong>Ctrl + Alt + G</strong> or select Pause in the dashboard. Desktop actions stop while the camera preview can continue.</p>
+        <p>After resuming, lower your hand briefly to re-arm control. Tracking loss and pause release held mouse buttons.</p>
+      </article>
+    </div>
+  </section>
+
   <!-- Privacy Callout -->
   <div class="privacy-callout" id="privacy">
     <div class="privacy-box">
@@ -564,18 +656,26 @@
 
   <!-- Download -->
   <section class="download-section" id="download">
-    <h2>Ready to Go Hands-Free?</h2>
-    <p>Set up the project from source using the installation steps in the README.</p>
+    <h2>Get SmartGestureOS</h2>
+    <p id="release-status" aria-live="polite">A validated public Windows installer is not available yet. Developers can run the project from source using the README.</p>
     <div class="download-actions">
       <a href="https://github.com/Sarvagyabirla/SmartGestureOS#installation-from-source" class="btn btn-primary" id="download-cta-btn">
-        Get Started
+        Run From Source
       </a>
       <a href="https://github.com/Sarvagyabirla/SmartGestureOS#readme" class="btn btn-ghost" target="_blank" rel="noopener">
         📖 Read the Docs
       </a>
     </div>
+    <div id="installer-instructions" hidden style="max-width: 620px; margin: 2rem auto; text-align: left;">
+      <h3>Install on Windows</h3>
+      <ol class="step-list"><li>Open the latest release and download its Windows installer and SHA256SUMS.txt.</li>
+        <li>Check the release notes and checksum, run the installer, and choose your shortcuts.</li>
+        <li>Launch SmartGestureOS from the Start menu and allow camera access. Python is not required.</li></ol>
+      <p>Windows may show SmartScreen for an unsigned installer. Check the publisher, source, and checksum before deciding whether to continue.</p>
+    </div>
+    <p style="margin-top: 1.5rem;">Microsoft Store status: <strong>NOT STARTED</strong>. Store identity, package validation, and submission are pending.</p>
     <p style="margin-top: 1.5rem; font-size: 0.8rem; color: rgba(240,240,255,0.35);">
-      MIT License &nbsp;·&nbsp; Free forever &nbsp;·&nbsp; Open source
+      MIT License &nbsp;·&nbsp; Free &nbsp;·&nbsp; Open source
     </p>
   </section>
 

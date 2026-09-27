@@ -6,9 +6,9 @@ States:
     running=True,  is_connected=False  →  trying to connect / reconnecting
     running=True,  is_connected=True   →  active
 
-Camera.start() always returns immediately. The capture thread handles
-retry internally so the application pipeline can start regardless of
-whether the physical camera is present at startup.
+Camera.start() attempts the initial open, then the capture thread handles
+retry internally so the application pipeline can start even when the
+physical camera is absent at startup.
 
 Camera.stop() is idempotent — safe to call multiple times.
 """
@@ -17,6 +17,7 @@ import cv2
 import threading
 import queue
 import time
+from collections import deque
 import numpy as np
 from .logger import logger
 
@@ -32,16 +33,27 @@ class Camera:
         self.running = False
         self._thread: threading.Thread | None = None
         self.is_connected = False
+        self.actual_width: int | None = None
+        self.actual_height: int | None = None
+        self._state_lock = threading.Lock()
+        self._generation = 0
+        self._capture_times: deque[float] = deque(maxlen=31)
 
         self.frame_queue: queue.Queue = queue.Queue(maxsize=1)
         self.frame_id: int = 0
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
+    def _mark_disconnected(self) -> None:
+        with self._state_lock:
+            self.is_connected = False
+            self._capture_times.clear()
+
     def _release_capture(self) -> None:
         """Discard the handle even when a failing driver raises on release."""
-        cap = self.cap
-        self.cap = None
+        with self._state_lock:
+            cap = self.cap
+            self.cap = None
         if cap is not None:
             try:
                 cap.release()
@@ -50,6 +62,7 @@ class Camera:
 
     def _open_capture(self) -> bool:
         """Open (or reopen) the VideoCapture. Returns True if opened."""
+        generation = self._generation
         self._release_capture()
         cap = None
         try:
@@ -58,8 +71,10 @@ class Camera:
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             cap.set(cv2.CAP_PROP_FPS, self.fps)
             if cap.isOpened():
-                self.cap = cap
-                return True
+                with self._state_lock:
+                    if generation == self._generation:
+                        self.cap = cap
+                        return True
         except Exception as e:
             logger.error(f"Camera._open_capture exception: {e}")
         if cap is not None:
@@ -71,9 +86,19 @@ class Camera:
 
     def _update(self) -> None:
         """Background capture thread — handles retry on failure."""
+        generation = self._generation
+        try:
+            self._capture_loop(generation)
+        finally:
+            # A native open/read can outlast stop's bounded join. Its worker
+            # owns cleanup so release never races that in-flight native call.
+            if generation != self._generation:
+                self._release_capture()
+
+    def _capture_loop(self, generation: int) -> None:
         failed_reads = 0
 
-        while self.running:
+        while self.running and generation == self._generation:
             # ── No cap / cap closed → retry ───────────────────────────────
             try:
                 capture_open = self.cap is not None and self.cap.isOpened()
@@ -81,12 +106,14 @@ class Camera:
                 logger.warning(f"Camera {self.index}: open-state check failed: {e}")
                 capture_open = False
             if not capture_open:
-                self.is_connected = False
+                self._mark_disconnected()
                 if not self._open_capture():
                     logger.warning(f"Camera {self.index}: not available, retrying in 1 s…")
                     time.sleep(1.0)
                     continue
                 logger.info(f"Camera {self.index}: opened successfully.")
+            if generation != self._generation:
+                break
 
             # ── Read frame ────────────────────────────────────────────────
             failure_reason = None
@@ -95,6 +122,8 @@ class Camera:
             except Exception as e:
                 ret, frame = False, None
                 failure_reason = f"read exception: {e}"
+            if generation != self._generation:
+                break
 
             if ret and isinstance(frame, np.ndarray):
                 if frame.ndim != 3 or frame.shape[2] != 3 or frame.size == 0 or frame.dtype != np.uint8:
@@ -110,7 +139,7 @@ class Camera:
                 failure_reason = "read returned no frame"
 
             if failure_reason is not None:
-                self.is_connected = False
+                self._mark_disconnected()
                 failed_reads += 1
                 if failed_reads == 1:
                     logger.warning(f"Camera {self.index}: {failure_reason}")
@@ -122,20 +151,36 @@ class Camera:
                 continue
 
             # ── Good frame ────────────────────────────────────────────────
-            self.is_connected = True
             failed_reads = 0
+            with self._state_lock:
+                if generation != self._generation:
+                    break
+                self.is_connected = True
+                self.actual_height, self.actual_width = frame.shape[:2]
+                if self.frame_queue.full():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except queue.Empty:
+                        pass
 
-            if self.frame_queue.full():
-                try:
-                    self.frame_queue.get_nowait()
-                except queue.Empty:
-                    pass
-
-            captured_at = time.perf_counter()
-            self.frame_queue.put((frame, self.frame_id, captured_at))
-            self.frame_id += 1
+                captured_at = time.perf_counter()
+                self._capture_times.append(captured_at)
+                self.frame_queue.put_nowait((frame, self.frame_id, captured_at))
+                self.frame_id += 1
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    @property
+    def measured_fps(self) -> float:
+        """Successful capture cadence over the last 31 frames, or zero if stale."""
+        with self._state_lock:
+            if len(self._capture_times) < 2:
+                return 0.0
+            first, last = self._capture_times[0], self._capture_times[-1]
+            elapsed = last - first
+            if elapsed <= 0.0 or time.perf_counter() - last > 1.0:
+                return 0.0
+            return (len(self._capture_times) - 1) / elapsed
 
     def start(self) -> bool:
         """
@@ -146,6 +191,9 @@ class Camera:
         """
         if self.running:
             return self.is_connected
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning(f"Camera {self.index}: previous capture is still stopping.")
+            return False
 
         self.running = True
         initial_ok = self._open_capture()
@@ -179,12 +227,21 @@ class Camera:
 
     def stop(self) -> None:
         """Stop capture thread and release resources. Idempotent."""
-        if not self.running:
-            return
-        self.running = False
+        with self._state_lock:
+            self.running = False
+            self._generation += 1
+            self.is_connected = False
+            self._capture_times.clear()
+            self.actual_width = self.actual_height = None
+            try:
+                self.frame_queue.get_nowait()
+            except queue.Empty:
+                pass
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
+            if self._thread.is_alive():
+                logger.warning(f"Camera {self.index}: waiting for an in-flight capture to finish.")
+                return
         self._thread = None
         self._release_capture()
-        self.is_connected = False
         logger.info(f"Camera {self.index}: stopped.")

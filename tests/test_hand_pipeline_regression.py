@@ -191,7 +191,7 @@ class TestHandPipelineRegression:
         world = [MockNormalizedLandmark(i * 0.01, i * 0.02, -0.03) for i in range(21)]
         backend.detect_for_video.return_value = MockHandLandmarkerResult(
             hand_landmarks=[raw],
-            handedness=[[MagicMock(score=0.95)]],
+            handedness=[[MagicMock(score=0.95, category_name="Left")]],
             hand_world_landmarks=[world],
         )
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -202,6 +202,7 @@ class TestHandPipelineRegression:
         assert len(hands) == 1
         assert len(hands[0]["landmarks"]) == 21
         assert hands[0]["score"] == 95
+        assert hands[0]["handedness"] == "Left"
         fingertip = hands[0]["landmarks"][20]
         assert fingertip.id == 20
         assert (fingertip.pixel_x, fingertip.pixel_y) == (1024, 576)
@@ -209,6 +210,20 @@ class TestHandPipelineRegression:
 
         detector.draw_landmarks(frame, hands[0]["landmarks"], color_phase=0.0)
         assert frame.sum() > 0
+
+    @pytest.mark.parametrize("categories", [None, [], [[]]])
+    def test_landmarks_remain_available_when_handedness_is_missing(
+        self, detector_and_backend, categories,
+    ):
+        detector, _, _ = detector_and_backend
+        hand = [MockNormalizedLandmark(0.5, 0.5, 0.0) for _ in range(21)]
+        result = MockHandLandmarkerResult([hand], categories)
+
+        hands = detector.get_all_hands_data(result, (480, 640, 3))
+
+        assert len(hands[0]["landmarks"]) == 21
+        assert hands[0]["handedness"] is None
+        assert hands[0]["score"] == 0
 
     @pytest.mark.parametrize(
         ("phase", "bgr"),

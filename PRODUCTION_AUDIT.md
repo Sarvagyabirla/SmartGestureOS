@@ -1,5 +1,9 @@
 # SmartGestureOS — Production Audit
 
+> Historical snapshot. Current requirements, subsystem status and remaining
+> work are in [the specification audit](docs/SPECIFICATION_AUDIT.md) and
+> [current execution evidence](docs/PRODUCT_EXECUTION_2026-09-27.md).
+
 **Audit Date:** 2026-09-24  
 **Branch:** main  
 **Commit:** 3349bb9+  

@@ -3,6 +3,8 @@ name: Build — Windows Installer
 on:
   push:
     branches: ["main", "production/**", "release/**"]
+  pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 concurrency:
@@ -39,7 +41,7 @@ jobs:
         run: pip check
 
       - name: Syntax check (compileall)
-        run: python -m compileall -q main.py config.py src
+        run: python -m compileall -q main.py config.py src tests scripts
 
       - name: Run tests (must pass before build)
         run: python -m pytest tests/ -v --tb=short -m "not hardware"
@@ -56,16 +58,18 @@ jobs:
           }
           Write-Host "EXE size: $((Get-Item 'dist\SmartGestureOS\SmartGestureOS.exe').Length) bytes"
 
-      - name: Check frozen startup and native inference
+      - name: Check frozen inference and UI without a camera
         run: |
           $exe = (Resolve-Path 'dist\SmartGestureOS\SmartGestureOS.exe').Path
-          $probe = Start-Process -FilePath $exe -ArgumentList '--self-check' -PassThru -WindowStyle Hidden
-          if (-not $probe.WaitForExit(60000)) {
-            Stop-Process -Id $probe.Id -Force
-            throw 'Frozen self-check timed out.'
-          }
-          if ($probe.ExitCode -ne 0) {
-            throw "Frozen self-check failed with exit code $($probe.ExitCode)."
+          foreach ($check in @('--self-check', '--ui-self-check')) {
+            $probe = Start-Process -FilePath $exe -ArgumentList $check -PassThru -WindowStyle Hidden
+            if (-not $probe.WaitForExit(60000)) {
+              Stop-Process -Id $probe.Id -Force
+              throw "Frozen $check timed out."
+            }
+            if ($probe.ExitCode -ne 0) {
+              throw "Frozen $check failed with exit code $($probe.ExitCode)."
+            }
           }
 
       - name: Install Inno Setup
@@ -73,14 +77,12 @@ jobs:
           choco install innosetup --no-progress -y
 
       - name: Build installer (Inno Setup) with dynamic version
-        run: |
-          $ver = "${{ steps.version.outputs.version }}"
-          iscc /DAppVersion=$ver packaging\windows\SmartGestureOS.iss
+        run: .\scripts\build_installer.ps1 -PythonExe (Get-Command python).Source
 
       - name: Verify installer exists and is non-empty
         id: installer
         run: |
-          $installer = Get-Item "dist\release\SmartGestureOS-Setup-v*.exe" -ErrorAction SilentlyContinue
+          $installer = Get-Item "dist\release\SmartGestureOS-Setup-v${{ steps.version.outputs.version }}.exe" -ErrorAction SilentlyContinue
           if (-not $installer) {
             Write-Error "Installer not found in dist\release\!"
             exit 1
@@ -107,3 +109,15 @@ jobs:
             dist/release/SmartGestureOS-Setup-v*.exe
             dist/release/SHA256SUMS.txt
           retention-days: 30
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-diagnostics-${{ github.sha }}
+          path: |
+            ~/AppData/Local/SmartGestureOS/logs/
+            ~/AppData/Local/SmartGesture/logs/
+            build/**/warn-*.txt
+          if-no-files-found: ignore
+          retention-days: 14

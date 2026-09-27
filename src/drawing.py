@@ -8,7 +8,6 @@ Undo stack capped at 20 snapshots (the initial blank state counts as slot 0).
 
 import cv2
 import numpy as np
-import os
 import time
 import uuid
 from .utils import PointSmoother, cubic_bezier_interpolation
@@ -81,12 +80,16 @@ class DrawingCanvas:
             return ActionResult(True, "resize_canvas", "No resize needed", None, t)
             
         try:
-            self.canvas = cv2.resize(self.canvas, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            # Commit only after every allocation succeeds. A failed history
+            # resize must leave the live canvas and its undo coordinates intact.
+            canvas = cv2.resize(self.canvas, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
+            undo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.undo_stack]
+            redo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.redo_stack]
+            self.canvas = canvas
             self.width = new_width
             self.height = new_height
-            
-            self.undo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.undo_stack]
-            self.redo_stack = [cv2.resize(s, (new_width, new_height), interpolation=cv2.INTER_NEAREST) for s in self.redo_stack]
+            self.undo_stack = undo_stack
+            self.redo_stack = redo_stack
             self.end_stroke()
             
             return ActionResult(True, "resize_canvas", f"Resized to {new_width}x{new_height}", None, t)
@@ -191,20 +194,26 @@ class DrawingCanvas:
         suffix = uuid.uuid4().hex[:6]
         filename = DRAWINGS_DIR / f"drawing_{ts_ms}_{suffix}.png"
 
-        success = cv2.imwrite(str(filename), self.canvas)
-        if success and os.path.exists(str(filename)):
+        try:
+            # OpenCV's Windows filename handling can corrupt Unicode paths.
+            # Encode pixels with OpenCV and let Python open the user directory.
+            success, encoded = cv2.imencode(".png", self.canvas)
+            if not success:
+                raise RuntimeError("PNG encoding failed")
+            filename.write_bytes(encoded.tobytes())
             return ActionResult(
                 True, "save_drawing",
                 f"Saved {filename.name}",
                 None,
                 time.perf_counter(),
             )
-        return ActionResult(
-            False, "save_drawing",
-            "Failed to save drawing.",
-            "cv2.imwrite failed or file missing",
-            time.perf_counter(),
-        )
+        except Exception as error:
+            return ActionResult(
+                False, "save_drawing",
+                "Failed to save drawing.",
+                str(error),
+                time.perf_counter(),
+            )
 
     # ── Overlay ───────────────────────────────────────────────────────────────
 

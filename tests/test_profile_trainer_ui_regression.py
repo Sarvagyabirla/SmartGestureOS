@@ -261,10 +261,57 @@ def settings_ui(profiles, monkeypatch):
     window = SimpleNamespace(**{name: MagicMock(get=MagicMock(return_value=value)) for name, value in (
         ("sensitivity_slider", 0.8), ("smoothing_slider", 5), ("hold_slider", 600),
         ("cooldown_slider", 800), ("rock_on_var", "open_chrome"), ("call_me_var", "switch_mode"),
+        ("camera_index_var", "0"),
     )})
     window.on_closing = MagicMock()
     window.apply_settings = lambda: settings_ui_module.SettingsUI.apply_settings(window)
     return manager, window, messages
+
+
+@pytest.mark.parametrize("camera_index", ["not a number", "-1", "256", "1.5", ""])
+def test_invalid_camera_selection_keeps_active_settings(settings_ui, camera_index):
+    manager, window, messages = settings_ui
+    previous = deepcopy(manager.settings)
+    window.camera_index_var.get.return_value = camera_index
+
+    assert settings_ui_module.SettingsUI.apply_settings(window) is False
+
+    assert manager.settings == previous
+    messages.showerror.assert_called_once()
+
+
+def test_camera_selection_persists_for_next_launch(settings_ui):
+    manager, window, messages = settings_ui
+    window.camera_index_var.get.return_value = "2"
+
+    assert settings_ui_module.SettingsUI.apply_settings(window) is True
+
+    reloaded = settings_module.SettingsManager(profiles_dir=manager.profiles_dir)
+    assert reloaded.settings["camera"]["index"] == 2
+    messages.showerror.assert_not_called()
+
+
+def test_selected_custom_profile_and_camera_survive_restart(profiles):
+    manager = settings_module.SettingsManager(profiles_dir=profiles)
+    assert manager.load_profile("USB Camera")
+    manager.settings["camera"]["index"] = 2
+    assert manager.save_profile()
+
+    restarted = settings_module.SettingsManager(profiles_dir=profiles)
+
+    assert restarted.current_profile == "USB Camera"
+    assert restarted.settings["camera"]["index"] == 2
+
+
+@pytest.mark.parametrize("active_profile", ["../outside", "Unknown profile", "CON", ""])
+def test_invalid_active_profile_preference_recovers_to_default(profiles, active_profile):
+    (profiles / ".active-profile").write_text(active_profile, encoding="utf-8")
+
+    manager = settings_module.SettingsManager(profiles_dir=profiles)
+
+    assert manager.current_profile == "default"
+    settings_module.validate_settings(manager.settings)
+    assert (profiles / ".active-profile").read_text(encoding="utf-8") == active_profile
 
 
 def test_settings_save_failure_rolls_back_and_keeps_window_open(settings_ui, monkeypatch):
@@ -317,7 +364,9 @@ def test_trainer_feedback_reflects_save_result_without_opening_tk(monkeypatch, s
     monkeypatch.setattr(trainer_ui_module, "gesture_trainer", trainer)
     window = SimpleNamespace(is_recording=True, master=SimpleNamespace(current_hands_data=[]),
                              samples_collected=30, target_samples=30, record_btn=MagicMock(),
-                             status_label=MagicMock(), name_entry=MagicMock(), update_list=MagicMock())
+                             status_label=MagicMock(), name_entry=MagicMock(), update_list=MagicMock(),
+                             start_recording=MagicMock())
+    window.retry_save = lambda: trainer_ui_module.TrainerUI.retry_save(window)
 
     trainer_ui_module.TrainerUI.record_loop(window, "Pose")
 
@@ -329,3 +378,20 @@ def test_trainer_feedback_reflects_save_result_without_opening_tk(monkeypatch, s
         assert "Save failed" in text
         window.name_entry.delete.assert_not_called()
         window.update_list.assert_not_called()
+
+
+def test_trainer_save_retry_does_not_record_more_samples(monkeypatch):
+    trainer = SimpleNamespace(save_models=MagicMock(side_effect=[False, True]))
+    monkeypatch.setattr(trainer_ui_module, "gesture_trainer", trainer)
+    window = SimpleNamespace(record_btn=MagicMock(), status_label=MagicMock(), name_entry=MagicMock(),
+                             update_list=MagicMock(), start_recording=MagicMock())
+    window.retry_save = lambda: trainer_ui_module.TrainerUI.retry_save(window)
+
+    window.retry_save()
+    retry = window.record_btn.configure.call_args.kwargs["command"]
+    retry()
+
+    assert trainer.save_models.call_count == 2
+    window.start_recording.assert_not_called()
+    window.update_list.assert_called_once()
+    assert window.record_btn.configure.call_args.kwargs["text"] == "Start Recording"

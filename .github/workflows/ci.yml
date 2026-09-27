@@ -2,9 +2,10 @@ name: CI — Tests
 
 on:
   push:
-    branches: ["main", "production/**", "hardening/**", "fix/**", "feature/**", "debug/**"]
+    branches: ["**"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -39,6 +40,9 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short --junitxml=test-results.xml
+
+      - name: Test website release availability
+        run: node --test tests/test_site_release.js
 
       - name: Upload test results
         if: always()
