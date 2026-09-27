@@ -31,12 +31,14 @@ class GestureHoldTimer:
         self.start_time: float = 0.0
         self.last_executed: float = 0.0
         self.executed_once: bool = False
+        self.target_duration: float = duration
 
     def reset(self) -> None:
         self.target_gesture = None
         self.start_time = 0.0
         self.last_executed = 0.0
         self.executed_once = False
+        self.target_duration = self.duration
 
     def get_progress(self) -> float:
         if (
@@ -46,10 +48,21 @@ class GestureHoldTimer:
         ):
             return 0.0
         now = time.perf_counter()
-        progress = (now - self.start_time) / self.duration
+        progress = (now - self.start_time) / max(1e-6, self.target_duration)
         return max(0.0, min(1.0, progress))
 
-    def check(self, gesture: str | None, is_repeatable: bool = False) -> bool:
+    def check(self, gesture: str | None, is_repeatable: bool = False,
+               duration: float | None = None) -> bool:
+        """Confirm a held gesture.
+
+        ``duration`` overrides the default hold for this action. A single
+        universal hold time is wrong for a mixed action set: the cursor and
+        scroll are continuous and effectively immediate, pinch has its own
+        EventEngine timing, volume wants a short confirmation plus repeat,
+        and high-impact actions (Lock PC, screenshot, app launches) want
+        much stronger confirmation.
+        """
+        effective = self.duration if duration is None else float(duration)
         if not gesture or gesture in ("None", "Unknown"):
             self.target_gesture = None
             self.executed_once = False
@@ -57,6 +70,7 @@ class GestureHoldTimer:
 
         if gesture != self.target_gesture:
             self.target_gesture = gesture
+            self.target_duration = effective
             self.start_time = time.perf_counter()
             self.last_executed = 0.0
             self.executed_once = False
@@ -68,7 +82,7 @@ class GestureHoldTimer:
         now = time.perf_counter()
 
         if not self.executed_once:
-            if now - self.start_time >= self.duration:
+            if now - self.start_time >= self.target_duration:
                 self.last_executed = now
                 self.executed_once = True
                 return True

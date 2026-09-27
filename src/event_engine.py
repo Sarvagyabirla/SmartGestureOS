@@ -118,14 +118,13 @@ class EventEngine:
             else:
                 return  # Still lost; do nothing
 
-        # ── Continuous mouse movement (non-blocking) ───────────────────────────
-        # Keep the click target fixed from pinch entry through dispatch. Move
-        # a drag only while the pinch is held, then drop at its last position.
-        navigating = (
-            self.state in (EventState.HOVER, EventState.COOLDOWN)
-            and raw_gesture in ("Pointing", "Three Fingers", "Victory", "Closed Fist")
-        )
-        if navigating or (self.state == EventState.DRAGGING and is_pinching):
+        # ── Drag cursor ───────────────────────────────────────────────────────
+        # Cursor *navigation* is no longer this engine's job: it lived in
+        # MouseController.process_pointer so a transient raw pose could not
+        # freeze the cursor, and so a slow discrete action could not stall it.
+        # A held drag is different — the left button is down, so the target
+        # must follow the fingertip and must be dropped on release.
+        if self.state == EventState.DRAGGING and is_pinching:
             self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
 
         # ── F-06 FIX: right-click release gate ────────────────────────────────
