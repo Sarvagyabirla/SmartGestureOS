@@ -100,7 +100,7 @@ def make_loop(monkeypatch):
                 return None
             return object()
 
-        def route(hands, stable, raw, frame, *, render_canvas=True):
+        def route(hands, stable, raw, frame, *, render_canvas=True, capture_at=None):
             if current.step.route_error:
                 raise RuntimeError("Simulated mapper failure")
             return frame, None, 0.0

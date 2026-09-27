@@ -53,6 +53,91 @@ def _make_landmarks(index_x=640, index_y=360, y_norm=0.5):
     return lms
 
 
+class _FakeClock:
+    """Deterministic monotonic clock for pointer-latency measurement."""
+
+    def __init__(self, start=0.0):
+        self.now = float(start)
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += float(seconds)
+        return self.now
+
+
+def test_pointer_path_turns_a_capture_timestamp_into_a_real_latency_measurement():
+    """The real controller must consume the camera capture timestamp.
+
+    Step 2 requires a measured capture-to-pointer latency. Without this
+    wiring the metric is permanently empty and would report a fabricated
+    0.0 ms, so the wiring itself is under test here.
+    """
+    from src.pointer_path import PointerMetrics
+
+    engine, mc, vm, _ = _make_mock_mouse_and_engine()
+    clock = _FakeClock()
+    mc.metrics = PointerMetrics(window=30, clock=clock)
+    lms = _make_landmarks(index_x=640, index_y=360)
+
+    for index_x, captured_at in ((640, 0.000), (700, 0.040)):
+        clock.advance(0.040)  # the frame was captured 40 ms ago
+        mc.process_landmarks(
+            _make_landmarks(index_x=index_x, index_y=360),
+            stable_gesture="Pointing", raw_gesture="Pointing",
+            frame_w=1280, frame_h=720, capture_at=captured_at,
+        )
+
+    metrics = mc.pointer_metrics
+    assert metrics.samples == 2
+    assert metrics.capture_to_pointer.count == 2
+    assert metrics.capture_to_pointer.median_ms == pytest.approx(40.0)
+
+
+def test_pointer_path_without_a_capture_timestamp_records_no_latency():
+    """No capture timestamp means no latency claim — never a guessed 0."""
+    from src.pointer_path import PointerMetrics
+
+    engine, mc, vm, _ = _make_mock_mouse_and_engine()
+    mc.metrics = PointerMetrics(window=30, clock=_FakeClock())
+    lms = _make_landmarks(index_x=640, index_y=360)
+
+    mc.process_landmarks(
+        lms, stable_gesture="Pointing", raw_gesture="Pointing",
+        frame_w=1280, frame_h=720,
+    )
+
+    assert mc.pointer_metrics.samples == 1
+    assert mc.pointer_metrics.capture_to_pointer.count == 0
+
+
+def test_pointer_path_records_latency_only_for_updates_actually_issued():
+    """A dead-zone-suppressed sample is not a cursor update, so it has no latency.
+
+    Counting suppressed samples as updates would overstate both the pointer
+    rate and the measured user-visible delay.
+    """
+    from src.pointer_path import PointerMetrics
+
+    engine, mc, vm, _ = _make_mock_mouse_and_engine()
+    clock = _FakeClock()
+    mc.metrics = PointerMetrics(window=30, clock=clock)
+    lms = _make_landmarks(index_x=640, index_y=360)
+
+    for _ in range(4):  # identical coordinates -> dead zone swallows them
+        clock.advance(0.040)
+        mc.process_landmarks(
+            lms, stable_gesture="Pointing", raw_gesture="Pointing",
+            frame_w=1280, frame_h=720, capture_at=clock.now - 0.040,
+        )
+
+    metrics = mc.pointer_metrics
+    assert metrics.samples == 1
+    assert metrics.suppressed == 3
+    assert metrics.capture_to_pointer.count == 1
+
+
 class TestInputControlRegression:
     def test_pointer_smoothing_setting_updates_live_filter_cutoff(self):
         engine, mc, vm, _ = _make_mock_mouse_and_engine()

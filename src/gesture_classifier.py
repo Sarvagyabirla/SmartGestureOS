@@ -3,6 +3,7 @@ import time
 from collections import deque, Counter
 from .utils import get_angle
 from .gesture_trainer import gesture_trainer
+from .logger import logger
 from config import SETTINGS
 from .models import Landmark, GestureResult
 
@@ -27,13 +28,60 @@ class GestureClassifier:
         self.confidence_ema = 0.0
         self.confidence_threshold = confidence_threshold
 
+        # Telemetry for physical diagnosis of pinch/scroll failures.
+        self.last_pinch_ratio = 0.0
+        self.last_two_finger_spacing = 0.0
+        self.last_divergence_ratio = 0.0
+        self.telemetry_enabled = False
+        self._telemetry_last_log = 0.0
+
         self.history = deque(maxlen=5)  # Mode filter for jitter suppression
         self.last_stable_gesture = "None"
 
         from src.settings_manager import settings_manager
         settings_manager.register_callback(self.on_settings_changed)
         self.on_settings_changed()
-        
+
+    def set_telemetry(self, enabled: bool) -> None:
+        """Enable/disable interaction telemetry logging.
+
+        Off by default: this is a diagnostic aid for a supervised physical
+        test session, not something to leave running in normal use.
+        """
+        self.telemetry_enabled = bool(enabled)
+
+    def emit_telemetry(self, raw_gesture, stable_gesture, confidence, state) -> None:
+        """One bounded telemetry line for pinch / scroll diagnosis.
+
+        Rate-limited to ~10 Hz and emitted only while a relevant interaction
+        is live, so a physical session does not produce a huge log. This is
+        what turns "single click does not work" into an answerable question:
+        whether the classifier ever reported Pinch, how far the pinch
+        geometry actually was, and which EventState was reached.
+        """
+        if not self.telemetry_enabled:
+            return
+        interesting = raw_gesture in (
+            "Pinch", "Pointing", "Two Fingers", "Victory",
+            "Crossed Fingers", "Unknown", "Three Fingers", "None",
+        ) or stable_gesture in ("Pinch", "Two Fingers")
+        if not interesting:
+            return
+        now = time.perf_counter()
+        if now - self._telemetry_last_log < 0.1:
+            return
+        self._telemetry_last_log = now
+        logger.info(
+            "TELEM raw=%s stable=%s conf=%.0f pinch_ratio=%.3f enter=%.3f "
+            "release=%.3f two_finger_spacing=%.3f victory_min=%.3f state=%s",
+            raw_gesture, stable_gesture, confidence, self.last_pinch_ratio,
+            getattr(self, "pinch_enter_threshold", 0.45),
+            getattr(self, "pinch_release_threshold", 0.6),
+            self.last_two_finger_spacing,
+            getattr(self, "victory_min_spacing", 0.35),
+            getattr(state, "name", state),
+        )
+
     def reset(self):
         self.history.clear()
         self.last_stable_gesture = "Unknown"
@@ -53,6 +101,28 @@ class GestureClassifier:
         
     def get_3d_point(self, lm: Landmark):
         return np.array([lm.x, lm.y, lm.z])
+
+    @staticmethod
+    def _decisiveness(diff: float, margin: float) -> float:
+        """Confidence that one finger's up/down call is *decisive*.
+
+        This must be the magnitude of the distance from the decision
+        boundary, NOT signed extension. The previous signed formula scored a
+        properly curled finger as 0.0, because a curled finger has its tip
+        roughly as far from the MCP as its PIP, so the signed difference
+        collapses to zero. Because shape_score is the mean across all five
+        fingers, that zero dragged every gesture containing a folded finger
+        (Pointing, Two/Three/Four Fingers, Closed Fist) below
+        confidence_threshold, so the temporal layer published "Unknown" and
+        every discrete action was blocked by can_start_action.
+
+        A finger sitting exactly on the boundary is genuinely uncertain and
+        still scores near zero; a clearly folded or clearly extended finger
+        both score high, which is what confidence is supposed to mean.
+        """
+        if margin <= 0:
+            return 0.0
+        return min(100.0, (abs(diff) / (margin * 2.0)) * 100.0)
 
     def fingers_up(self, lms_list):
         if not lms_list or len(lms_list) < 21:
@@ -78,9 +148,7 @@ class GestureClassifier:
         is_thumb_up = 1 if diff_thumb > margin else 0
         fingers.append(is_thumb_up)
         
-        s_thumb = min(100.0, max(0.0, (diff_thumb / (margin * 2)) * 100.0))
-        if is_thumb_up == 0:
-            s_thumb = min(100.0, max(0.0, (-diff_thumb / (margin * 2)) * 100.0))
+        s_thumb = self._decisiveness(diff_thumb, margin)
         scores.append(s_thumb)
         
         # Other fingers: Check if tip is further from mcp than pip
@@ -96,9 +164,7 @@ class GestureClassifier:
             is_finger_up = 1 if diff > margin else 0
             fingers.append(is_finger_up)
             
-            s = min(100.0, max(0.0, (diff / (margin * 2)) * 100.0))
-            if is_finger_up == 0:
-                s = min(100.0, max(0.0, (-diff / (margin * 2)) * 100.0))
+            s = self._decisiveness(diff, margin)
             scores.append(s)
             
         return fingers, scores
@@ -137,6 +203,10 @@ class GestureClassifier:
             
         enter_thresh = getattr(self, 'pinch_enter_threshold', 0.45)
         release_thresh = getattr(self, 'pinch_release_threshold', 0.6)
+        pinch_ratio = d_pinch / hand_size
+        # Recorded for telemetry so a physical session shows the real geometry
+        # instead of leaving "pinch did not register" unanswerable.
+        self.last_pinch_ratio = float(pinch_ratio)
         
         pinch_ratio = d_pinch / hand_size
         if not self.is_pinching:
@@ -172,6 +242,10 @@ class GestureClassifier:
         elif fingers[1:3] == [1, 1] and fingers[3:] == [0, 0]:
             d_index_middle = np.linalg.norm(index_tip - middle_tip)
             d_mcp = np.linalg.norm(index_mcp - middle_mcp)
+            # Real geometry for telemetry: this is the number that decides
+            # Two Fingers vs Victory vs Crossed Fingers, so a physical session
+            # can show whether the pose was simply too wide.
+            self.last_two_finger_spacing = float(d_index_middle / hand_size)
             
             # Calculate divergence angle
             v_index = index_tip - index_mcp

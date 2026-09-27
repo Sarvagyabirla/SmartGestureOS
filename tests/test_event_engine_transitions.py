@@ -32,7 +32,10 @@ def test_short_pinch_release_does_not_become_drag_from_stale_stable_pose(pipelin
     assert engine.state == EventState.PINCH_RELEASE_WAIT
     tick(0.40, "Pointing", stable="Pinch")
     mouse.drag.assert_not_called()
-    tick(0.57, "Pointing")
+    # The click is dispatched once the double-click window has elapsed. The
+    # test derives that from the engine rather than hardcoding a delay, so it
+    # keeps expressing intent if the gesture window is ever retuned.
+    tick(0.34 + engine.double_click_window_ms + 0.01, "Pointing")
     mouse.click.assert_called_once_with(button="left")
 
 
@@ -45,7 +48,7 @@ def test_release_crossing_hold_deadline_keeps_click_when_drag_never_started(pipe
     tick(0.36, "Pointing", stable="Pinch")
     assert engine.state == EventState.PINCH_RELEASE_WAIT
     mouse.drag.assert_not_called()
-    tick(0.59, "Pointing")
+    tick(0.36 + engine.double_click_window_ms + 0.01, "Pointing")
     mouse.click.assert_called_once_with(button="left")
     mouse.double_click.assert_not_called()
 
@@ -119,9 +122,13 @@ def test_pending_click_keeps_its_cursor_target_until_dispatched(pipeline):
     mouse.reset_mock()
     tick(0.01, "Pinch")
     tick(0.1, "Pointing")
+    # Still inside the double-click window: the cursor must not move while a
+    # click is pending, and no button may fire yet.
     tick(0.2, "Pointing", y=0.8)
     tick(0.33, "Pointing", y=0.9)
     mouse.move.assert_not_called()
+    mouse.click.assert_not_called()
+    tick(0.1 + engine.double_click_window_ms + 0.01, "Pointing")
     mouse.click.assert_called_once_with(button="left")
 
 

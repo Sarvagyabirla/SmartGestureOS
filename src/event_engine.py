@@ -21,9 +21,42 @@ Safety contract:
     This guarantees left-button is never left pressed.
 """
 
+import ctypes
 import time
 import enum
 import math
+
+# ── Gesture double-click window ─────────────────────────────────────────────
+# The previous value was a hardcoded 220 ms. That is a *mouse* double-click
+# interval, and it was measured on this machine as GetDoubleClickTime() = 200.
+# A hand gesture is much slower than a mouse button press: releasing a pinch
+# and deliberately re-pinching comfortably takes 300-500 ms. With a 220 ms
+# window the second pinch almost always arrived AFTER the window expired, so
+# the pending click committed as a single click and the second pinch started a
+# fresh one — producing "single + single" instead of a double click.
+#
+# The window is therefore derived from the Windows setting and bounded:
+# long enough for a deliberate two-pinch cycle, short enough that a later,
+# unrelated pinch is not merged into a double click.
+_GESTURE_WINDOW_SCALE = 2.0
+_GESTURE_WINDOW_MIN_MS = 300.0
+_GESTURE_WINDOW_MAX_MS = 500.0
+
+
+def windows_double_click_time_ms(default: int = 500) -> int:
+    """Windows' configured double-click interval, or a safe default."""
+    try:
+        value = int(ctypes.windll.user32.GetDoubleClickTime())
+    except Exception:
+        return default
+    # A nonsensical reading must not silently disable double clicking.
+    return value if 100 <= value <= 2000 else default
+
+
+def gesture_double_click_window_ms() -> float:
+    """Gesture-appropriate double-click window in milliseconds."""
+    scaled = windows_double_click_time_ms() * _GESTURE_WINDOW_SCALE
+    return min(_GESTURE_WINDOW_MAX_MS, max(_GESTURE_WINDOW_MIN_MS, scaled))
 
 
 class EventState(enum.Enum):
@@ -55,7 +88,9 @@ class EventEngine:
         self._right_click_armed = True  # True = ready to fire right-click
 
         # Configuration (updated by settings callback in MouseController)
-        self.double_click_window_ms = 220 / 1000.0  # Crisp double-click window
+        # Double-click window is derived from the Windows mouse interval rather
+        # than hardcoded; see gesture_double_click_window_ms().
+        self.double_click_window_ms = gesture_double_click_window_ms() / 1000.0
         self.drag_hold_ms = 350 / 1000.0
         self.cooldown_duration = 150 / 1000.0
 

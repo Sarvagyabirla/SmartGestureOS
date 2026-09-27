@@ -269,6 +269,7 @@ class GestureMapper:
         frame,
         *,
         render_canvas: bool = True,
+        capture_at: float | None = None,
     ) -> tuple:
         import cv2
         action = None
@@ -319,7 +320,7 @@ class GestureMapper:
 
         # ── Mode-specific continuous actions ──────────────────────────────────
         if self.mode == "GENERAL":
-            self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h)
+            self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h, capture_at=capture_at)
 
             if gesture == "Middle Finger" and gesture_confirmed:
                 result = self.brightness.set_brightness_from_y(h1[12].y)

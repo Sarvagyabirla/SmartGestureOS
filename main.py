@@ -21,7 +21,14 @@ class MainApp:
     _REARM_ARMED    = "armed"       # full automation active
     _REARM_NEUTRAL_REQUIRED: int = 5  # frames of neutral required to arm
 
-    def __init__(self, start_paused: bool = False):
+    def __init__(self, start_paused: bool = True):
+        """Production startup is PAUSED by default.
+
+        Camera and landmarks stay live so the user can position their hand,
+        but no Windows action can fire until they deliberately Resume (button
+        or Ctrl+Alt+G) and neutral re-arm completes. Starting armed risks a
+        random action while the hand is still moving into position.
+        """
         self.camera = Camera(
             index=SETTINGS["camera"]["index"],
             width=SETTINGS["camera"]["width"],
@@ -493,8 +500,19 @@ class MainApp:
                                 display_frame, latest_action, latest_progress = self.mapper.process(
                                     latest_hands_data, latest_stable_gesture,
                                     latest_raw_gesture, display_frame, render_canvas=False,
+                                    capture_at=capture_time,
                                 )
                                 routed_result = True
+                                # Interaction telemetry for physical diagnosis.
+                                # Guarded so it costs nothing and calls nothing
+                                # when disabled (the default). The identity check
+                                # matters: a test double returns a truthy mock
+                                # attribute, which must not switch telemetry on.
+                                if getattr(self.classifier, "telemetry_enabled", False) is True:
+                                    self.classifier.emit_telemetry(
+                                        latest_raw_gesture, latest_stable_gesture,
+                                        latest_confidence, self.mapper.mouse.engine.state,
+                                    )
 
                         # Presentation runs for every camera frame, including
                         # skipped inference, pause and hand loss. Routing edits
@@ -542,6 +560,19 @@ class MainApp:
             if elapsed < 1.0 / 60.0:
                 time.sleep(1.0 / 60.0 - elapsed)
 
+    def _pointer_metrics_snapshot(self) -> dict:
+        """Real measured pointer-path counters for the diagnostic log.
+
+        Returns an empty dict rather than raising when the pointer path is
+        unavailable, so logging can never disturb the control pipeline.
+        Values are measured, never extrapolated: the camera runs at ~30 FPS,
+        so a pointer rate above the detector rate is not reported as such.
+        """
+        try:
+            return self.mapper.mouse.pointer_metrics.as_dict()
+        except Exception:
+            return {}
+
     def update_ui_loop(self) -> None:
         try:
             with self._automation_lock:
@@ -582,12 +613,20 @@ class MainApp:
                     landmarks = hands_data[0]["landmarks"] if hands_data else []
                     tip = ((landmarks[8].pixel_x, landmarks[8].pixel_y)
                            if len(landmarks) == 21 else None)
+                    pointer = self._pointer_metrics_snapshot()
                     logger.debug(
                         "Preview: camera=%s hands=%d landmarks=%d index_tip=%s "
-                        "raw=%s stable=%s fps=%d input_ms=%d inference_ms=%.1f automation=%s",
+                        "raw=%s stable=%s fps=%d input_ms=%d inference_ms=%.1f "
+                        "pointer_fps=%.1f capture_to_pointer_ms=%.1f "
+                        "pointer_samples=%d pointer_suppressed=%d automation=%s",
                         camera_on, len(hands_data), len(landmarks), tip,
                         raw_gesture, stable_gesture, fps, avg_latency,
-                        self.detector.average_inference_latency, automation_enabled,
+                        self.detector.average_inference_latency,
+                        pointer.get("pointer_fps", 0.0),
+                        pointer.get("capture_to_pointer_ms", 0.0),
+                        pointer.get("pointer_samples", 0),
+                        pointer.get("pointer_suppressed", 0),
+                        automation_enabled,
                     )
                     self._last_preview_log_time = now
         except Exception:
@@ -671,8 +710,16 @@ def run_ui_self_check() -> bool:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="SmartGestureOS desktop application")
-    parser.add_argument("--start-paused", action="store_true",
-                        help="Show live tracking with desktop automation initially paused")
+    # Automation is PAUSED unless the operator explicitly opts in. The flag
+    # is kept for compatibility; --start-active is the intentional override.
+    parser.add_argument("--start-paused", action="store_true", default=True,
+                        help="Show live tracking with desktop automation initially paused (default)")
+    parser.add_argument("--start-active", dest="start_paused", action="store_false",
+                        help="Developer override: arm automation immediately on launch "
+                             "(no neutral re-arm). Not for normal use.")
+    parser.add_argument("--telemetry", action="store_true",
+                        help="Log per-interaction pinch/scroll telemetry (rate-limited, "
+                             "for diagnosing physical click and scroll failures)")
     parser.add_argument("--self-check", action="store_true",
                         help="Check bundled model and native inference without opening the camera or UI")
     parser.add_argument("--ui-self-check", action="store_true",
@@ -683,4 +730,5 @@ if __name__ == "__main__":
     if args.ui_self_check:
         raise SystemExit(0 if run_ui_self_check() else 1)
     app = MainApp(start_paused=args.start_paused)
+    app.classifier.set_telemetry(args.telemetry)
     app.run()
