@@ -50,6 +50,22 @@ POINTING = "Pointing"
 NEUTRAL_RAW = frozenset({"", "None", "Unknown", "none", "unknown"})
 
 #: Gestures that must end pointer control on the frame they appear.
+#: Any label that is neither POINTING nor neutral is treated as conflicting,
+#: so custom/trained gestures are covered by default; this set exists for
+#: diagnostics and for the stable-gesture cross-check during a grace window.
+CONFLICTING_RAW = frozenset({
+    "Pinch",
+    "Two Fingers", "Victory", "Crossed Fingers",
+    "Three Fingers", "Four Fingers", "Middle Finger",
+    "Open Palm", "Closed Fist",
+    "Rock On", "Call Me",
+    "Thumb Up", "Thumb Down",
+})
+
+#: Bounds for the grace interval. 80-120 ms covers one dropped inference at
+#: ~30 FPS without ever holding a stale pointer through a real hand loss.
+GRACE_MS_MIN = 80.0
+GRACE_MS_MAX = 120.0
 
 
 class PointerIntent:
@@ -97,6 +113,15 @@ class PointerIntent:
 
     @property
     def state(self) -> str:
+        """One of: inactive, entering, active, grace (diagnostics overlay)."""
+        return self._state
+
+    def reset(self) -> None:
+        """Full reset — hand loss, camera loss, pause, mode change."""
+        self._active = False
+        self._pointing_samples = 0
+        self._last_pointing_at = 0.0
+        self._state = "inactive"
 
     # ── the oracle ─────────────────────────────────────────────────────────
 
@@ -200,6 +225,22 @@ class LatencyMeter:
     def count(self) -> int:
         return len(self._samples)
 
+    @property
+    def mean_ms(self) -> float:
+        if not self._samples:
+            return 0.0
+        return sum(self._samples) / len(self._samples)
+
+    @property
+    def median_ms(self) -> float:
+        if not self._samples:
+            return 0.0
+        ordered = sorted(self._samples)
+        middle = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[middle]
+        return (ordered[middle - 1] + ordered[middle]) / 2.0
+
 
 class PointerMetrics:
     """Cadence and latency counters for the pointer path.
@@ -249,47 +290,3 @@ class PointerMetrics:
             "inference_median_ms": self.inference.median_ms,
             "inference_mean_ms": self.inference.mean_ms,
         }
-
-
-    @property
-    def mean_ms(self) -> float:
-        if not self._samples:
-            return 0.0
-        return sum(self._samples) / len(self._samples)
-
-    @property
-    def median_ms(self) -> float:
-        if not self._samples:
-            return 0.0
-        ordered = sorted(self._samples)
-        middle = len(ordered) // 2
-        if len(ordered) % 2:
-            return ordered[middle]
-        return (ordered[middle - 1] + ordered[middle]) / 2.0
-
-        """One of: inactive, entering, active, grace (diagnostics overlay)."""
-        return self._state
-
-    def reset(self) -> None:
-        """Full reset — hand loss, camera loss, pause, mode change."""
-        self._active = False
-        self._pointing_samples = 0
-        self._last_pointing_at = 0.0
-        self._state = "inactive"
-
-#: Any label that is neither POINTING nor neutral is treated as conflicting,
-#: so custom/trained gestures are covered by default; this set exists for
-#: diagnostics and for the stable-gesture cross-check during a grace window.
-CONFLICTING_RAW = frozenset({
-    "Pinch",
-    "Two Fingers", "Victory", "Crossed Fingers",
-    "Three Fingers", "Four Fingers", "Middle Finger",
-    "Open Palm", "Closed Fist",
-    "Rock On", "Call Me",
-    "Thumb Up", "Thumb Down",
-})
-
-#: Bounds for the grace interval. 80-120 ms covers one dropped inference at
-#: ~30 FPS without ever holding a stale pointer through a real hand loss.
-GRACE_MS_MIN = 80.0
-GRACE_MS_MAX = 120.0

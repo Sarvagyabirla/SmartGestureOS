@@ -11,6 +11,18 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_WHEEL = 0x0800
 
 class VirtualMouse:
+    # Pointer-path telemetry. ``updates`` counts accepted cursor updates and
+    # ``suppressed`` counts samples the dead zone swallowed while the pointer
+    # was live; together they give a real pointer-update rate instead of an
+    # assumed frame rate.
+    #
+    # Declared at class scope on purpose: instrumentation must never be able
+    # to break cursor movement. Instances built without __init__ (a real
+    # construction path used by the test doubles) still get sane counters,
+    # and the first += rebinds an instance attribute.
+    updates = 0
+    suppressed = 0
+
     def __init__(self, min_cutoff=0.8, beta=0.2, deadzone=1.5):
         self.smoother = PointSmoother(min_cutoff=min_cutoff, beta=beta)
         self.deadzone = deadzone
@@ -33,13 +45,6 @@ class VirtualMouse:
         self.last_click_time = 0
         self.is_dragging = False
         self.last_pos = None
-
-        # Pointer-path telemetry. ``updates`` counts accepted cursor updates,
-        # ``suppressed`` counts samples the deadzone swallowed while the
-        # pointer was live. Together they give a real pointer-update rate
-        # instead of an assumed frame rate.
-        self.updates = 0
-        self.suppressed = 0
 
         # Pre-load windll to avoid lookup overhead
         self.user32 = ctypes.windll.user32
