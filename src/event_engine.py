@@ -78,6 +78,13 @@ class EventEngine:
 
         self.scroll_start_y = None
         self.scroll_accumulator = 0.0
+        # Scroll intent hysteresis. A single dropped classifier frame used to
+        # end SCROLLING and zero the accumulator, so one noisy "Two Fingers"
+        # read permanently truncated a real scroll. Bounded grace tolerates
+        # classifier uncertainty only; a genuinely conflicting pose still
+        # stops scrolling on the same frame.
+        self._scroll_last_confirmed_at = 0.0
+        self.scroll_exit_grace_s = 0.12
 
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
@@ -110,6 +117,7 @@ class EventEngine:
         self._second_pinch_pending = False
         self.scroll_start_y = None
         self.scroll_accumulator = 0.0
+        self._scroll_last_confirmed_at = 0.0
         self._right_click_armed = True
         self.mouse.mouse.release_all()
         self._change_state(EventState.HAND_LOST)
@@ -177,6 +185,9 @@ class EventEngine:
                 y = lms_list[8].y if lms_list else float("nan")
                 self.scroll_start_y = y if math.isfinite(y) and 0.0 <= y <= 1.0 else None
                 self.scroll_accumulator = 0.0
+                # Stamp the entry frame, otherwise the first uncertain frame
+                # would compare against a stale zero and end the scroll.
+                self._scroll_last_confirmed_at = now
                 self._change_state(EventState.SCROLLING)
 
             elif stable_gesture == raw_gesture == "Three Fingers" and self._right_click_armed:
@@ -242,9 +253,29 @@ class EventEngine:
                 self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.SCROLLING:
+            if is_scrolling:
+                self._scroll_last_confirmed_at = now
             if not is_scrolling:
+                uncertain = raw_gesture in ("Unknown", "None")
+                within_grace = (
+                    uncertain
+                    and (now - self._scroll_last_confirmed_at) <= self.scroll_exit_grace_s
+                )
+                if within_grace:
+                    # Discard the gap. Re-anchoring to the current hand
+                    # position means resuming cannot replay the unobserved
+                    # motion as a wheel jump. Nothing accumulates or emits
+                    # while the pose is uncertain.
+                    if lms_list:
+                        grace_y = lms_list[8].y
+                        self.scroll_start_y = (
+                            grace_y if math.isfinite(grace_y) and 0.0 <= grace_y <= 1.0
+                            else None
+                        )
+                    return
                 self.scroll_start_y = None
                 self.scroll_accumulator = 0.0
+                self._scroll_last_confirmed_at = 0.0
                 self._change_state(EventState.HOVER)
             elif lms_list:
                 current_y = lms_list[8].y

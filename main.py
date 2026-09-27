@@ -484,6 +484,13 @@ class MainApp:
                     # No action may start after pause/reset completes. Never
                     # count the same inference twice toward re-arm or a hold.
                     routed_result = False
+
+                    # ── Phase 1: short, locked state transition ────────────────
+                    # The lock protects state only. mapper.process() reaches
+                    # ImageGrab, subprocess.Popen and pycaw, which can block
+                    # for hundreds of milliseconds; holding the lock across it
+                    # froze the Tk thread (which also needs this lock) and made
+                    # the tracking watchdog observe a stale capture timestamp.
                     with self._automation_lock:
                         if not self.running:
                             break
@@ -491,55 +498,81 @@ class MainApp:
                             clear_observation()
                             observed_generation = self._tracking_generation
                             has_new_result = False
-                        if not self._automation_enabled:
-                            latest_action, latest_progress = "Paused", 0.0
-                        elif has_new_result:
-                            if not self._tick_rearm(latest_stable_gesture, latest_raw_gesture):
-                                latest_action, latest_progress = "Re-arming", 0.0
-                            else:
-                                display_frame, latest_action, latest_progress = self.mapper.process(
-                                    latest_hands_data, latest_stable_gesture,
-                                    latest_raw_gesture, display_frame, render_canvas=False,
-                                    capture_at=capture_time,
-                                )
-                                routed_result = True
-                                # Interaction telemetry for physical diagnosis.
-                                # Guarded so it costs nothing and calls nothing
-                                # when disabled (the default). The identity check
-                                # matters: a test double returns a truthy mock
-                                # attribute, which must not switch telemetry on.
-                                if getattr(self.classifier, "telemetry_enabled", False) is True:
-                                    self.classifier.emit_telemetry(
-                                        latest_raw_gesture, latest_stable_gesture,
-                                        latest_confidence, self.mapper.mouse.engine.state,
-                                    )
-
-                        # Presentation runs for every camera frame, including
-                        # skipped inference, pause and hand loss. Routing edits
-                        # the canvas only on fresh results; composite it once.
-                        if self.mapper.mode == "DRAW":
-                            display_frame = self.mapper.canvas.get_overlay(display_frame)
-                        for hand in latest_hands_data:
-                            self.detector.draw_landmarks(display_frame, hand["landmarks"])
-                        if routed_result:
-                            display_frame = self.draw_overlays(
-                                display_frame, latest_hands_data, latest_progress,
+                        automation_on = self._automation_enabled
+                        route_generation = self._tracking_generation
+                        rearm_ok = False
+                        if automation_on and has_new_result:
+                            rearm_ok = self._tick_rearm(
+                                latest_stable_gesture, latest_raw_gesture,
                             )
-                        # Feedback stays above artwork, so pausing is visible
-                        # even when the user has filled the entire canvas.
-                        if not self.detector.available:
-                            cv2.putText(display_frame,
-                                        f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
-                                        (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                        if not self._automation_enabled:
-                            cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                        elif self._rearm_state == self._REARM_WAITING:
-                            cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
-                                        (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-                        elif self.mapper.is_sleeping:
-                            cv2.putText(display_frame, "AUTOMATION SLEEPING", (50, 50),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+
+                    # ── Phase 2: slow routing, NO lock held ─────────────────────
+                    if not automation_on:
+                        latest_action, latest_progress = "Paused", 0.0
+                    elif has_new_result and not rearm_ok:
+                        latest_action, latest_progress = "Re-arming", 0.0
+                    elif has_new_result:
+                        display_frame, latest_action, latest_progress = self.mapper.process(
+                            latest_hands_data, latest_stable_gesture,
+                            latest_raw_gesture, display_frame, render_canvas=False,
+                            capture_at=capture_time,
+                        )
+                        routed_result = True
+                        # Interaction telemetry for physical diagnosis.
+                        # Guarded so it costs nothing and calls nothing when
+                        # disabled (the default). The identity check matters:
+                        # a test double returns a truthy mock attribute.
+                        if getattr(self.classifier, "telemetry_enabled", False) is True:
+                            self.classifier.emit_telemetry(
+                                latest_raw_gesture, latest_stable_gesture,
+                                latest_confidence, self.mapper.mouse.engine.state,
+                            )
+
+                    # ── Phase 3: re-validate after the unlocked section ─────────
+                    # A pause, tracking reset or shutdown that happened while
+                    # the action was running must invalidate its result.
+                    with self._automation_lock:
+                        route_stale = (
+                            self._tracking_generation != route_generation
+                            or not self.running
+                        )
+                    if route_stale:
+                        latest_action, latest_progress = None, 0.0
+                        routed_result = False
+                        display_frame = frame
+
+                    # Presentation runs for every camera frame, including
+                    # skipped inference, pause and hand loss. Routing edits
+                    # the canvas only on fresh results; composite it once.
+                    # Drawn outside the lock: pure CPU work with no shared
+                    # state, and keeping it out shortens lock hold time.
+                    with self._automation_lock:
+                        mode_is_draw = self.mapper.mode == "DRAW"
+                        paused_overlay = not self._automation_enabled
+                        waiting_overlay = self._rearm_state == self._REARM_WAITING
+                    if mode_is_draw:
+                        display_frame = self.mapper.canvas.get_overlay(display_frame)
+                    for hand in latest_hands_data:
+                        self.detector.draw_landmarks(display_frame, hand["landmarks"])
+                    if routed_result:
+                        display_frame = self.draw_overlays(
+                            display_frame, latest_hands_data, latest_progress,
+                        )
+                    # Feedback stays above artwork, so pausing is visible
+                    # even when the user has filled the entire canvas.
+                    if not self.detector.available:
+                        cv2.putText(display_frame,
+                                    f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
+                                    (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    if paused_overlay:
+                        cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    elif waiting_overlay:
+                        cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
+                                    (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+                    elif self.mapper.is_sleeping:
+                        cv2.putText(display_frame, "AUTOMATION SLEEPING", (50, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
                     if has_new_result:
                         self.latency_history.append(int((time.perf_counter() - capture_time) * 1000))

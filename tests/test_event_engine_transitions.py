@@ -184,3 +184,70 @@ def test_right_click_waits_for_stabilized_three_fingers(pipeline):
     tick(0.3, "Three Fingers")
     tick(0.5, "Three Fingers")
     mouse.click.assert_called_once_with(button="right")
+
+
+# ── Scroll intent hysteresis ───────────────────────────────────────────────
+# Regression: one dropped classifier frame used to end SCROLLING and zero the
+# accumulator, so a single noisy "Two Fingers" read truncated a real scroll.
+
+
+def test_scroll_survives_one_unknown_frame_with_fresh_landmarks(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Two Fingers", y=0.4)
+    assert engine.state == EventState.SCROLLING
+
+    mouse.reset_mock()
+    tick(0.1, "Unknown", y=0.4)
+
+    assert engine.state == EventState.SCROLLING, "one uncertain frame must not end a scroll"
+    mouse.scroll.assert_not_called(), "no wheel event may be emitted while uncertain"
+
+
+def test_scroll_grace_does_not_replay_the_gap_as_motion(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Two Fingers", y=0.4)
+    # A large hand movement happens entirely during the uncertain frame.
+    tick(0.05, "Unknown", y=0.9)
+    mouse.reset_mock()
+    # Resuming in place must emit nothing: the gap was discarded, not replayed.
+    tick(0.10, "Two Fingers", y=0.9)
+    mouse.scroll.assert_not_called()
+
+
+def test_scroll_exits_immediately_on_a_conflicting_pose(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Two Fingers", y=0.4)
+    assert engine.state == EventState.SCROLLING
+
+    # A real conflicting pose is not classifier uncertainty: stop at once.
+    tick(0.05, "Three Fingers", y=0.4)
+    assert engine.state == EventState.HOVER
+    assert engine.scroll_accumulator == 0.0
+
+
+def test_scroll_grace_expires_and_resets_state(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Two Fingers", y=0.4)
+    tick(0.1, "Unknown", y=0.4)
+    assert engine.state == EventState.SCROLLING
+
+    # Beyond the bounded grace window the scroll is over.
+    tick(0.1 + engine.scroll_exit_grace_s + 0.01, "Unknown", y=0.4)
+    assert engine.state == EventState.HOVER
+    assert engine.scroll_start_y is None
+    assert engine.scroll_accumulator == 0.0
+
+
+def test_scroll_after_grace_does_not_leak_into_the_next_gesture(pipeline):
+    engine, mouse, tick = pipeline
+    tick(0, "Two Fingers", y=0.4)
+    tick(0.1, "Unknown", y=0.4)
+    tick(0.1 + engine.scroll_exit_grace_s + 0.01, "Unknown", y=0.4)
+    assert engine.state == EventState.HOVER
+
+    # A fresh Two Fingers gesture starts from a clean anchor.
+    mouse.reset_mock()
+    tick(0.5, "Two Fingers", y=0.10)
+    mouse.scroll.assert_not_called()
+    tick(0.6, "Two Fingers", y=0.16)
+    assert mouse.scroll.call_count == 1

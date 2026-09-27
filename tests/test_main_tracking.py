@@ -490,4 +490,92 @@ def test_ui_watchdog_releases_before_blocked_inference_returns_and_discards_resu
     app.mapper.process.assert_called_once()
     assert_cleared(app.frame_queue.published[-1])
     assert app._tracking_capture_time is None
+    assert app._tracking_capture_time is None
+    assert app._tracking_generation == 1
+
+
+# ── Automation lock scope (Phase 4.2) ──────────────────────────────────────
+# mapper.process() reaches ImageGrab, subprocess.Popen and pycaw, which can
+# block for hundreds of milliseconds. Holding _automation_lock across it
+# blocked the Tk thread (which also needs that lock) and appeared to freeze
+# the application, and it left the tracking watchdog reading a stale capture
+# timestamp. The lock must cover short state transitions only.
+
+
+def _blocking_route(entered, release):
+    def route(hands, stable, raw, frame, **kwargs):
+        entered.set()
+        if not release.wait(timeout=5.0):
+            raise AssertionError("Test did not release the blocked action")
+        return frame, "Executed: slow_action", 1.0
+
+    return route
+
+
+def _run_in_thread(app, run):
+    errors = []
+
+    def worker():
+        try:
+            run()
+        except BaseException as exc:  # ScriptFinished ends the script
+            errors.append(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    return thread, errors
+
+
+def test_slow_action_does_not_hold_the_automation_lock(make_loop):
+    app, run = make_loop([FrameStep(10.0, hand_at())])
+    app.ui = MagicMock(current_hands_data=[])
+    entered, release = threading.Event(), threading.Event()
+    app.mapper.process.side_effect = _blocking_route(entered, release)
+
+    thread, errors = _run_in_thread(app, run)
+    try:
+        assert entered.wait(timeout=3.0), "routing never started"
+        acquired = threading.Event()
+
+        def try_lock():
+            with app._automation_lock:
+                acquired.set()
+
+        probe = threading.Thread(target=try_lock, daemon=True)
+        probe.start()
+        probe.join(timeout=2.0)
+        assert acquired.is_set(), (
+            "_automation_lock was held across a slow action; the UI thread "
+            "would block for the whole duration"
+        )
+    finally:
+        release.set()
+        thread.join(timeout=3.0)
+
+    assert not errors or isinstance(errors[0], BaseException)
+
+
+def test_pause_during_a_slow_action_invalidates_its_result(make_loop):
+    """A pause that lands while an action is running must discard that action."""
+    app, run = make_loop([FrameStep(10.0, hand_at())])
+    app.ui = MagicMock(current_hands_data=[])
+    entered, release = threading.Event(), threading.Event()
+    app.mapper.process.side_effect = _blocking_route(entered, release)
+
+    thread, errors = _run_in_thread(app, run)
+    published = None
+    try:
+        assert entered.wait(timeout=3.0), "routing never started"
+        # Pause lands while the slow action is still inside mapper.process.
+        app.set_automation_enabled(False)
+        release.set()
+        thread.join(timeout=3.0)
+        published = app.frame_queue.published[-1]
+    finally:
+        release.set()
+        thread.join(timeout=3.0)
+
+    assert published[6] != "Executed: slow_action", (
+        "a stale action result was published after Pause"
+    )
     assert app._tracking_generation == 1
