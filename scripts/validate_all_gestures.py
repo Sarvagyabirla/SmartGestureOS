@@ -24,6 +24,7 @@ from config import SETTINGS
 from src.camera import Camera
 from src.gesture_detector import GestureDetector
 from src.gesture_classifier import GestureClassifier
+from src.gesture_mapper import GestureIntentGate, _get_action_policy
 from src.models import GestureResult, Landmark
 
 logger = logging.getLogger("GestureValidator")
@@ -244,6 +245,7 @@ class LiveGestureValidator:
     def _run_single_attempt(self, target_gesture: str, on_frame_update=None) -> Dict[str, Any]:
         """Auto-grades one gesture attempt without manual intervention."""
         self.classifier.reset()
+        gate = GestureIntentGate()
         attempt_start = time.perf_counter()
         target_hold_start = None
         passed = False
@@ -279,12 +281,40 @@ class LiveGestureValidator:
             raw_gesture = "None"
             stable_gesture = "None"
             confidence = 0.0
+            finger_vector = []
+            landmark_count = 0
+            mapped_action = "none"
+            intent_progress = 0.0
 
             if hands:
+                lms = hands[0].get("landmarks", [])
+                landmark_count = len(lms)
+                if landmark_count >= 21:
+                    finger_vector, _ = self.classifier.fingers_up(lms)
+
                 res = self.classifier.classify(hands)
                 raw_gesture = res.raw_gesture
                 stable_gesture = res.gesture
                 confidence = float(res.confidence)
+                mapped_action = SETTINGS.get("mappings", {}).get("GENERAL", {}).get(stable_gesture, "none")
+
+                # Intent Gate tracking with dropout grace (Section 17-21)
+                policy = _get_action_policy(mapped_action)
+                should_fire = gate.check(
+                    stable_gesture,
+                    raw_gesture=raw_gesture,
+                    duration=policy["hold_ms"] / 1000.0,
+                    dropout_grace=policy["dropout_grace_ms"] / 1000.0,
+                    action_name=mapped_action,
+                    now=now,
+                )
+                intent_progress = gate.get_progress(now=now)
+
+                if should_fire or (stable_gesture == target_gesture and intent_progress >= 0.99):
+                    passed = True
+                    recognition_ms = (now - attempt_start) * 1000.0
+                    final_confidence = confidence
+                    break
 
             # Record confusions
             if raw_gesture != target_gesture and raw_gesture not in ("None", "Unknown"):
@@ -292,7 +322,7 @@ class LiveGestureValidator:
             if stable_gesture != target_gesture and stable_gesture not in ("None", "Unknown"):
                 stable_confusions[stable_gesture] = stable_confusions.get(stable_gesture, 0) + 1
 
-            # Check for sustained target gesture
+            # Fallback simple timer if target matches directly
             is_target = (stable_gesture == target_gesture) or (raw_gesture == target_gesture and confidence >= 60)
             if is_target:
                 if target_hold_start is None:
@@ -310,9 +340,13 @@ class LiveGestureValidator:
                 on_frame_update({
                     "target": target_gesture,
                     "hands_detected": len(hands) > 0,
+                    "landmark_count": landmark_count,
+                    "finger_vector": finger_vector,
                     "raw_gesture": raw_gesture,
                     "stable_gesture": stable_gesture,
                     "confidence": confidence,
+                    "mapped_action": mapped_action,
+                    "intent_progress": round(intent_progress * 100.0, 1),
                     "held_ms": (now - target_hold_start) * 1000.0 if target_hold_start else 0.0,
                     "required_ms": self.hold_required_ms,
                     "elapsed_s": now - attempt_start,

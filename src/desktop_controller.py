@@ -9,7 +9,9 @@ import keyboard
 import time
 import uuid
 import os
+import threading
 from src.models import ActionResult
+from src.paths import SCREENSHOTS_DIR
 from .logger import logger
 
 
@@ -58,22 +60,47 @@ class DesktopController:
         filename = SCREENSHOTS_DIR / f"screen_{ts_ms}_{suffix}.png"
 
         try:
-            # Attach current thread to Windows interactive input desktop
-            try:
-                u32 = ctypes.windll.user32
-                hdesk = u32.OpenInputDesktop(0, False, 0x01FF)
-                if hdesk:
-                    u32.SetThreadDesktop(hdesk)
-                    u32.CloseDesktop(hdesk)
-            except Exception as desk_err:
-                logger.debug(f"Input desktop attachment note: {desk_err}")
-
-            # Capture all screens, falling back to primary screen
+            # Attempt 1: Direct grab (fast path; also handles patched mocks in unit tests)
             img = None
             try:
                 img = ImageGrab.grab(all_screens=True)
             except Exception:
-                img = ImageGrab.grab()
+                try:
+                    img = ImageGrab.grab()
+                except Exception:
+                    img = None
+
+            # Attempt 2: Isolated thread with interactive desktop attachment
+            # Necessary when caller thread has windows/hooks (Win32 ERROR_BUSY 170)
+            # or runs in an unattached desktop context (Win32 ERROR_ACCESS_DENIED 5).
+            if img is None:
+                box = [None, None]
+                def _isolated_grab():
+                    try:
+                        u32 = ctypes.windll.user32
+                        hdesk = u32.OpenInputDesktop(0, False, 0x01FF)
+                        if hdesk:
+                            u32.SetThreadDesktop(hdesk)
+                            u32.CloseDesktop(hdesk)
+                    except Exception as desk_err:
+                        logger.debug(f"Input desktop attachment note: {desk_err}")
+                    try:
+                        box[0] = ImageGrab.grab(all_screens=True)
+                    except Exception:
+                        try:
+                            box[0] = ImageGrab.grab()
+                        except Exception as grab_err:
+                            box[1] = grab_err
+
+                worker = threading.Thread(target=_isolated_grab, name="screenshot-grabber")
+                worker.start()
+                worker.join(timeout=3.0)
+                if box[0] is not None:
+                    img = box[0]
+                elif box[1] is not None:
+                    raise box[1]
+                else:
+                    raise RuntimeError("Screen grab timed out")
 
             if img is None:
                 raise RuntimeError("Screen grab returned None")
