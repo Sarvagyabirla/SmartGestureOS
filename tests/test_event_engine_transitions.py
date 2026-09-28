@@ -32,11 +32,10 @@ def test_short_pinch_release_does_not_become_drag_from_stale_stable_pose(pipelin
     assert engine.state == EventState.PINCH_RELEASE_WAIT
     tick(0.40, "Pointing", stable="Pinch")
     mouse.drag.assert_not_called()
-    # The click is dispatched once the double-click window has elapsed. The
-    # test derives that from the engine rather than hardcoding a delay, so it
-    # keeps expressing intent if the gesture window is ever retuned.
-    tick(0.34 + engine.double_click_window_ms + 0.01, "Pointing")
+    # Sections 25-26: The click is dispatched immediately on pinch release.
     mouse.click.assert_called_once_with(button="left")
+    tick(0.34 + engine.double_click_window_ms + 0.01, "Pointing")
+    assert mouse.click.call_count == 1
 
 
 def test_release_crossing_hold_deadline_keeps_click_when_drag_never_started(pipeline):
@@ -48,9 +47,9 @@ def test_release_crossing_hold_deadline_keeps_click_when_drag_never_started(pipe
     tick(0.36, "Pointing", stable="Pinch")
     assert engine.state == EventState.PINCH_RELEASE_WAIT
     mouse.drag.assert_not_called()
-    tick(0.36 + engine.double_click_window_ms + 0.01, "Pointing")
     mouse.click.assert_called_once_with(button="left")
-    mouse.double_click.assert_not_called()
+    tick(0.36 + engine.double_click_window_ms + 0.01, "Pointing")
+    assert mouse.click.call_count == 1
 
 
 def test_drag_drops_on_raw_release_before_stable_pose_catches_up(pipeline):
@@ -69,11 +68,13 @@ def test_second_short_pinch_clicks_twice_only_after_its_release(pipeline):
     engine, mouse, tick = pipeline
     tick(0, "Pinch")
     tick(0.1, "Pointing")
+    assert mouse.click.call_count == 1
     tick(0.2, "Pinch")
-    mouse.double_click.assert_not_called()
+    assert mouse.click.call_count == 1
     tick(0.25, "Pointing")
-    mouse.double_click.assert_called_once_with()
-    mouse.click.assert_not_called()
+    # Sections 25-26: Each short pinch release emits one immediate click,
+    # naturally forming a Windows double-click with zero artificial wait.
+    assert mouse.click.call_count == 2
     mouse.drag.assert_not_called()
 
 
@@ -81,10 +82,10 @@ def test_second_short_pinch_can_finish_after_its_entry_window(pipeline):
     engine, mouse, tick = pipeline
     tick(0, "Pinch")
     tick(0.1, "Pointing")
-    tick(0.3, "Pinch")  # Starts within 220 ms of the first release.
+    assert mouse.click.call_count == 1
+    tick(0.3, "Pinch")  # Starts within double-click window
     tick(0.55, "Pointing")  # Still a short second pinch; release is later.
-    mouse.double_click.assert_called_once_with()
-    mouse.click.assert_not_called()
+    assert mouse.click.call_count == 2
     assert engine.state == EventState.COOLDOWN
 
 
@@ -92,17 +93,14 @@ def test_second_pinch_that_becomes_a_hold_drags_without_double_click(pipeline):
     engine, mouse, tick = pipeline
     tick(0, "Pinch")
     tick(0.1, "Pointing")
+    assert mouse.click.call_count == 1
     tick(0.2, "Pinch")
-    mouse.double_click.assert_not_called()
     tick(0.33, "Pinch")
-    mouse.click.assert_not_called()
     tick(0.56, "Pinch")
-    mouse.click.assert_called_once_with(button="left")
     mouse.drag.assert_called_once_with(start=True)
     assert engine.state == EventState.DRAGGING
     tick(0.6, "Pointing")
     mouse.drag.assert_any_call(start=False)
-    mouse.double_click.assert_not_called()
 
 
 def test_raw_pinch_with_stale_pointing_label_does_not_queue_ghost_click(pipeline):
@@ -122,14 +120,12 @@ def test_pending_click_keeps_its_cursor_target_until_dispatched(pipeline):
     mouse.reset_mock()
     tick(0.01, "Pinch")
     tick(0.1, "Pointing")
-    # Still inside the double-click window: the cursor must not move while a
-    # click is pending, and no button may fire yet.
+    # Immediate click dispatched on pinch release
+    mouse.click.assert_called_once_with(button="left")
+    # Subsequent pointing frames do not fire additional clicks
     tick(0.2, "Pointing", y=0.8)
     tick(0.33, "Pointing", y=0.9)
-    mouse.move.assert_not_called()
-    mouse.click.assert_not_called()
-    tick(0.1 + engine.double_click_window_ms + 0.01, "Pointing")
-    mouse.click.assert_called_once_with(button="left")
+    assert mouse.click.call_count == 1
 
 
 def test_scroll_freezes_on_entry_and_stops_on_raw_exit(pipeline):

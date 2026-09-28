@@ -8,11 +8,13 @@
         "fps": 30
     },
     "gestures": {
-        "sensitivity": 0.7,
+        "sensitivity": 0.75,
         "cooldown_ms": 500,
         "smoothing": 2,
         "hold_time_ms": 300,
-        "base_hand_size": 1.0
+        "base_hand_size": 1.0,
+        "pointer_enter_samples": 2,
+        "pointer_grace_ms": 100.0
     },
     "ui": {
         "theme": "dark",
@@ -48,13 +50,13 @@
         }
     },
     "calibration": {
-        "confidence_threshold": 50.0,
+        "confidence_threshold": 35.0,
         "hand_size_baseline": 1.0,
         "pointer_extension_ratio": 0.4,
         "pinch_enter_threshold": 0.45,
         "pinch_release_threshold": 0.6,
-        "two_finger_max_spacing": 0.2,
-        "victory_min_spacing": 0.35,
+        "two_finger_max_spacing": 0.22,
+        "victory_min_spacing": 0.30,
         "active_roi_margin": 0.2
     }
 }

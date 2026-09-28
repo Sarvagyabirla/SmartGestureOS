@@ -26,8 +26,8 @@ from .utils import get_distance
 from .logger import logger
 from .pointer_path import PointerIntent, PointerMetrics
 
-_DEFAULT_SENSITIVITY = 0.85
-_DEFAULT_SMOOTHING = 1
+_DEFAULT_SENSITIVITY = 0.75
+_DEFAULT_SMOOTHING = 2
 
 # Pointer tuning, derived from the MEASURED detector cadence on the
 # development machine (scripts/diagnose_runtime.py): camera ~14.7 FPS,
@@ -142,6 +142,7 @@ class MouseController:
         # tune() reaches already-created One Euro filters as well as future ones.
         self.mouse.smoother.tune(min_cutoff, beta)
         self.mouse.deadzone = self._sensitivity_deadzone(sensitivity)
+        self.mouse.active_roi_margin = float(SETTINGS.get("calibration", {}).get("active_roi_margin", 0.20))
         self.pointer_intent.apply_settings(
             enter_samples=gestures.get("pointer_enter_samples"),
             grace_ms=gestures.get("pointer_grace_ms"),
@@ -152,6 +153,7 @@ class MouseController:
             "min_cutoff_hz": min_cutoff,
             "beta": beta,
             "deadzone_px": self.mouse.deadzone,
+            "active_roi_margin": self.mouse.active_roi_margin,
             "enter_samples": self.pointer_intent.enter_samples,
             "grace_ms": self.pointer_intent.grace_ms,
             "profile": SETTINGS.get("profile_name", "?"),
@@ -190,7 +192,7 @@ class MouseController:
     # ── FAST POINTER PATH ──────────────────────────────────────────────────
 
     def process_pointer(self, lms_list, raw_gesture, stable_gesture, frame_w,
-                        frame_h, now=None, capture_at=None):
+                        frame_h, now=None, capture_at=None, confidence=0.0):
         """Move the cursor from fresh index-fingertip geometry. Returns moved.
 
         Call this on EVERY fresh valid inference result while pointer intent is
@@ -207,10 +209,12 @@ class MouseController:
             self.pointer_intent.reset()
             return False
 
-        if not self.pointer_intent.update(raw_gesture, stable_gesture, now=now):
-            # A conflicting gesture ended pointer control cleanly. Drop the
-            # filtered trail so the next session does not drag stale motion.
-            self.mouse.reset_pointer_filter()
+        if not self.pointer_intent.update(raw_gesture, stable_gesture, now=now, confidence=confidence):
+            # Section 30-31: Preserve smoother and last_pos when Pinch begins
+            # so drag starts without a first-frame snap. For non-pinch exits
+            # (or real hand loss), drop the filter cleanly.
+            if raw_gesture != "Pinch" and stable_gesture != "Pinch":
+                self.mouse.reset_pointer_filter()
             return False
 
         moved = bool(self.mouse.move(index_x, index_y, frame_w, frame_h))
@@ -228,7 +232,7 @@ class MouseController:
     # ── GESTURE / ACTION PATH ──────────────────────────────────────────────
 
     def process_landmarks(self, lms_list, stable_gesture, raw_gesture, frame_w, frame_h,
-                          now=None, capture_at=None):
+                          now=None, capture_at=None, confidence=0.0):
         if not lms_list or len(lms_list) < 21:
             self.release_all()
             return
@@ -242,7 +246,7 @@ class MouseController:
         # depend on the discrete-action path completing.
         self.process_pointer(
             lms_list, raw_gesture, stable_gesture, frame_w, frame_h,
-            now=now, capture_at=capture_at,
+            now=now, capture_at=capture_at, confidence=confidence,
         )
 
         # Delegate discrete input (click/drag/scroll/right-click) to the
@@ -255,7 +259,8 @@ class MouseController:
             frame_w=frame_w,
             frame_h=frame_h,
             lms_list=lms_list,
-            scale_factor=scale_factor
+            scale_factor=scale_factor,
+            confidence=confidence,
         )
 
     def release_all(self):

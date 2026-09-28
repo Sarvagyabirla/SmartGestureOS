@@ -9,7 +9,7 @@ Use this module everywhere version is needed:
     - MSIX manifest
 """
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __version_info__ = tuple(int(part) for part in __version__.split("."))
 __app_name__ = "SmartGestureOS"
 __description__ = "Gesture Control for Windows"

@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-09-29 02:59:39",
+  "mode": "Automated [MEASURED]",
+  "pointer_acquisition": {
+    "targets_tested": 9,
+    "median_acquisition_time_s": 0.248033600000781,
+    "p95_acquisition_time_s": 0.24899930000538006,
+    "median_endpoint_error_px": 8.06225774829855,
+    "p95_endpoint_error_px": 11.180339887498949,
+    "overshoot_frequency": 0.0,
+    "mean_path_efficiency": 0.9026145276004479
+  },
+  "pointer_jitter": {
+    "duration_s": 1.1485810000012862,
+    "rms_jitter_px": 2.1134489978863145,
+    "p95_jitter_px": 3.0,
+    "max_displacement_px": 3.605551275463989,
+    "updates_per_sec": 88.80523010557008,
+    "suppressed_updates": 19
+  },
+  "fast_movement": {
+    "median_latency_ms": 0.023100001271814108,
+    "p95_latency_ms": 0.1399000029778108,
+    "overshoot_px": 0.0,
+    "settling_time_ms": 16.0
+  },
+  "click_quality": {
+    "single_click_attempts": 20,
+    "single_click_successes": 20,
+    "single_click_accuracy": 1.0,
+    "median_click_latency_ms": 0.12660000356845558,
+    "p95_click_latency_ms": 0.305499997921288,
+    "median_drift_px": 0.0,
+    "p95_drift_px": 2.0,
+    "false_clicks": 0
+  },
+  "double_click": {
+    "attempts": 15,
+    "successes": 15,
+    "accuracy": 1.0,
+    "median_interval_ms": 57.07530000654515,
+    "triple_clicks": 0,
+    "accidental_drags": 0
+  },
+  "drag_quality": {
+    "attempts": 10,
+    "successes": 10,
+    "accuracy": 1.0,
+    "median_start_latency_ms": 350.0,
+    "first_frame_jump_px": 0.0,
+    "drop_failures": 0,
+    "stuck_mouse": 0
+  },
+  "scroll_quality": {
+    "down_ticks_generated": 5,
+    "max_ticks_per_frame": 3,
+    "clamped_within_bounds": true,
+    "runaway_scroll_events": 0,
+    "stop_latency_ms": 0.0
+  },
+  "right_click": {
+    "fired_once": true,
+    "repeats_while_held": 0,
+    "re_armed_after_release": true
+  },
+  "transition_matrix": {
+    "Pointing -> Pinch": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Pinch -> Pointing": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Pointing -> Two Fingers": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Two Fingers -> Victory": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Victory -> Two Fingers": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Open Palm -> Four Fingers": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Closed Fist -> Thumb Up": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Pinch -> Drag": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    },
+    "Drag -> Release": {
+      "transition_successful": true,
+      "latency_ms": 33.0,
+      "wrong_intermediate_action": "None"
+    }
+  },
+  "passed_all_gates": true
+}

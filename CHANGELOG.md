@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.1] — 2026-09-29
+
+### Final Human-Interaction Quality Pass — Fluent Interaction, Immediate Clicks & Release Hardening
+
+- **Canonical Configuration & Zero-Drift Settings Architecture**:
+  - Unified configuration across `config/defaults.json`, `profiles/default.json`, `_SAFE_DEFAULTS`, `MouseController`, `GestureClassifier`, and `PointerIntent`.
+  - Added safe runtime profile migration (`_migrate_profile_data`) that automatically upgrades legacy factory defaults (confidence threshold 50.0 -> 35.0, two-finger spacing 0.2 -> 0.22, victory spacing 0.35 -> 0.30) without modifying custom user mappings or camera preferences.
+  - Added `reset_control_settings_to_recommended()` to `SettingsManager`.
+  - Added automated regression tests to guarantee zero future configuration drift.
+
+- **Immediate Single-Click & Native Windows Double-Click Redesign**:
+  - Eliminated artificial single-click deferral window in `EventEngine`. Short pinch releases immediately emit a left click (down + up).
+  - A second short pinch release within the double-click window naturally emits another immediate left click, allowing Windows to handle native double-click timing without synthetic 3-click errors or double-click lag.
+  - Implemented Click Anchor on Pinch onset: cursor position is anchored the instant pinch begins, eliminating click target drift as thumb approaches index.
+
+- **Drag Continuity & Seamless Transition**:
+  - Preserved One-Euro filter state on pinch start and seeded smoother directly from click anchor upon drag transition, eliminating first-frame cursor snaps.
+  - Implemented adaptive drag intent: drag initiates immediately upon 16px motion after 120ms, or after standard hold duration without motion.
+  - Added safe failsafe drop on raw release before stable classifier catches up.
+
+- **Confidence-Aware Pointer Intent & Exit Policy**:
+  - Immediate single-frame pointer activation when raw Pointing geometric confidence >= 60%; 2-frame guarded entry for moderate confidence.
+  - Immediate exit on real hand loss (`NO_HAND_RAW`), bounded 100ms grace only for transient classifier uncertainty (`UNKNOWN_RAW`).
+  - Added soft-edge coordinate mapping using `tanh` near ROI margins for comfortable screen corner reachability without edge lock or abrupt jumps.
+
+- **Scroll Refinements & Bounded Velocity**:
+  - Added natural deadzone filtering to avoid jitter on initial gesture formation.
+  - Velocity-sensitive scaling with bounded max 3 ticks per frame to prevent runaway scroll acceleration.
+
+- **Discrete Action Hold Times & Right-Click Release Gate**:
+  - Discrete right-click on Three Fingers with release gating to prevent continuous repeats while held.
+  - Differentiated action hold times: volume actions respond with 200ms initial confirmation, while discrete high-impact actions maintain deliberate 300ms confirmation.
+
+- **Master Interaction Benchmark (`scripts/validate_interaction_quality.py`)**:
+  - Built comprehensive benchmark suite covering 9-target pointer acquisition, rest jitter, fast movement lag, click latency/drift, double click intervals, drag continuity, scroll bounds, and transition matrix. All gates passing (100% Core Passing).
+
+---
+
 ## [0.9.0] — 2026-09-29
 
 ### Final Product Completion Pass — Physical Gesture Pipeline, Fluent UI & Clean Architecture

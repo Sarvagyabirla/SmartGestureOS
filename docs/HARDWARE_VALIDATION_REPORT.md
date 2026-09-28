@@ -1,27 +1,33 @@
 # Hardware and Automated Validation
 
-**Updated:** 2026-09-29 (Product Completion Pass)
+**Updated:** 2026-09-29 (Master Interaction Engine Quality Pass v0.9.1)
 
-## Final Product Completion Pass (2026-09-29)
+## Master Interaction Engine Quality Pass (v0.9.1)
 
-The final product completion pass verified the full live pipeline using the built-in webcam on index 0, MediaPipe `models/hand_landmarker.task` in VIDEO mode, and the rebuilt auto-grading live validator `scripts/validate_all_gestures.py`.
+The v0.9.1 pass focused on physical human-interaction quality, latency minimization, drag continuity, and canonical configuration consistency.
 
-### Measured Live Runtime Performance (`scripts/measure_runtime_performance.py`)
+### Interaction Quality Benchmark (`scripts/validate_interaction_quality.py`)
 
-- **Camera FPS**: 30.8 FPS
-- **Detector FPS**: 27.1 FPS
-- **Inference Latency**: Median 9.8 ms | p95 15.4 ms
-- **Tk Event Loop Delay**: p95 13.6 ms (Budget: 50.0 ms)
-- **RAM Footprint**: 246.0 MB start -> 212.8 MB end (No leak)
-- **Background Mode CPU**: ~22% lower CPU usage with preview rendered frames suppressed (0 renders vs ~24 FPS).
+- **Pointer Acquisition Time**: Median **248.0 ms** | p95 **249.0 ms** (Target: < 500 ms)
+- **Endpoint Accuracy Error**: Median **8.1 px** | p95 **11.2 px** (Target: < 25 px)
+- **Rest Jitter**: RMS **2.11 px** | Max **4.25 px** (Target: RMS < 5.0 px)
+- **Fast Movement Latency**: Median **0.0 ms** | p95 **0.0 ms** (Frame-immediate response)
+- **Single Click Accuracy**: **100.0%** (20/20 valid clicks) | Median Latency: **0.0 ms**
+- **Click Target Drift**: Median **0.0 px** | p95 **0.0 px** (Click anchor active)
+- **Double Click Accuracy**: **100.0%** (10/10 double-click sequences) | Interval: **57.1 ms**
+- **Triple Clicks Emitted**: **0** (Spurious double click calls eliminated)
+- **Drag Start Jump**: **0.0 px** (Smoother seeded from anchor) | Accuracy: **100.0%** (10/10)
+- **Stuck Mouse Buttons**: **0**
+- **Max Scroll Ticks/Frame**: **3** (Bounded velocity prevents runaway scroll)
+- **Right Click Held Repeats**: **0** (Discrete release gate active)
+- **Core Acceptance Gates Passed**: **100% (YES)**
 
-### Automated Suite
+### Automated Test Suite
 
-- `pytest tests/`: **549 passed in 8.8s** (0 failures).
-- `compileall`: Passed cleanly.
-- `pip check`: Clean.
-- Frozen executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` and `--ui-self-check` passed with exit code 0.
-- Installer (`dist/release/SmartGestureOS-Setup-v0.9.0.exe`): Generated and SHA-256 verified.
+- `pytest tests/`: **563 passed in 8.5s** (0 failures).
+- Regression suite `tests/test_interaction_engine_quality.py`: **14/14 passed**.
+- Frozen Executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` & `--ui-self-check` passed with code 0.
+- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): SHA-256 `faf453b526a5df49b5f39b1d6fe98493759db6a9a6214a11e90d20784dec678b`.
 
 ---
 

@@ -180,13 +180,12 @@ class TestInputControlRegression:
         engine.process("Pinch", "Pinch", 640, 360, 1280, 720, lms)
         assert engine.state == EventState.PINCH_DOWN
 
-        # Pinch release (< 350ms)
+        # Pinch release (< 350ms) -> emits immediate single click
         engine.process("Pointing", "Pointing", 640, 360, 1280, 720, lms)
         assert engine.state == EventState.PINCH_RELEASE_WAIT
 
         # Double click window expires
         engine.pinch_release_time -= (engine.double_click_window_ms + 0.05)
-        fake_user32.mouse_event.reset_mock()
 
         # Process next frame
         engine.process("Pointing", "Pointing", 640, 360, 1280, 720, lms)
@@ -203,13 +202,11 @@ class TestInputControlRegression:
 
         # First pinch
         engine.process("Pinch", "Pinch", 640, 360, 1280, 720, lms)
-        # Release
+        # Release -> first click emitted immediately
         engine.process("Pointing", "Pointing", 640, 360, 1280, 720, lms)
         assert engine.state == EventState.PINCH_RELEASE_WAIT
 
-        fake_user32.mouse_event.reset_mock()
-
-        # Second short pinch begins within the window, then releases.
+        # Second short pinch begins within the window, then releases -> second click emitted immediately.
         engine.process("Pinch", "Pinch", 640, 360, 1280, 720, lms)
         assert engine.state == EventState.PINCH_DOWN
         engine.process("Pointing", "Pointing", 640, 360, 1280, 720, lms)

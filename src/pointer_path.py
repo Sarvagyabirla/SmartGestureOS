@@ -45,9 +45,16 @@ from collections import deque
 #: The only raw label that carries pointer intent.
 POINTING = "Pointing"
 
-#: Raw labels with no pointer intent and no conflict. A single noisy
-#: MediaPipe frame lands here; neither label may stop the cursor.
-NEUTRAL_RAW = frozenset({"", "None", "Unknown", "none", "unknown"})
+#: Raw labels indicating REAL HAND LOSS (no hand detected by MediaPipe).
+#: Section 13: Real hand loss ends pointer control immediately without grace.
+NO_HAND_RAW = frozenset({"", "None", "none"})
+
+#: Raw labels indicating classifier uncertainty while hand landmarks are still present.
+#: Section 13: A single uncertain frame receives a bounded grace period.
+UNKNOWN_RAW = frozenset({"Unknown", "unknown"})
+
+#: Backward compatibility alias
+NEUTRAL_RAW = NO_HAND_RAW | UNKNOWN_RAW
 
 #: Gestures that must end pointer control on the frame they appear.
 #: Any label that is neither POINTING nor neutral is treated as conflicting,
@@ -125,21 +132,30 @@ class PointerIntent:
 
     # ── the oracle ─────────────────────────────────────────────────────────
 
-    def update(self, raw_gesture, stable_gesture=None, now=None) -> bool:
+    def update(self, raw_gesture, stable_gesture=None, now=None, confidence=0.0) -> bool:
         """Feed one classifier result. True when the cursor should move.
 
-        ``raw_gesture`` drives exit decisions immediately; ``stable_gesture``
-        only shortens the *entry* wait, so a settled Pointing is honoured
-        immediately without letting the slower history gate the cursor.
+        Confidence-aware entry (Section 12):
+        - If Pointing confidence is strong (>= 60%), activate immediately on sample 1.
+        - If Pointing confidence is moderate, require enter_samples confirmation.
+        - If stable == Pointing, activate immediately.
+
+        Exit policy (Section 13):
+        - REAL HAND LOSS (no landmarks / 'None') exits immediately on frame 1.
+        - Classification uncertainty ('Unknown' with landmarks) gets bounded grace.
+        - Conflicting gestures exit immediately on frame 1.
         """
         now = self._clock() if now is None else float(now)
         raw = raw_gesture or "None"
         stable = stable_gesture or "None"
+        conf = float(confidence) if confidence is not None else 0.0
 
         if raw == POINTING:
             self._pointing_samples += 1
             self._last_pointing_at = now
-            if not self._active and (stable == POINTING
+            # Section 12: fast strong entry vs safe weak entry
+            is_strong = conf >= 60.0
+            if not self._active and (is_strong or stable == POINTING
                                      or self._pointing_samples >= self._enter_samples):
                 self._active = True
             if self._active:
@@ -148,7 +164,15 @@ class PointerIntent:
             self._state = "entering"
             return False
 
-        if raw in NEUTRAL_RAW:
+        # Section 13: Real hand loss — must stop immediately without grace
+        if raw in NO_HAND_RAW:
+            self._active = False
+            self._pointing_samples = 0
+            self._state = "inactive"
+            return False
+
+        # Section 13: Hand present but classifier uncertain — apply bounded grace
+        if raw in UNKNOWN_RAW:
             within_grace = (
                 self._active
                 and (now - self._last_pointing_at) <= self._grace_s

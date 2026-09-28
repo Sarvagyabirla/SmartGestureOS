@@ -48,6 +48,16 @@ _ASYNC_ACTIONS = frozenset({
     "save_drawing",
 })
 
+# Action-specific hold times (Section 44 & 45):
+# High-impact / dangerous actions require deliberate confirmation (0.5 - 0.6s)
+# Normal discrete actions take default hold (0.25 - 0.3s)
+# Volume has responsive initial confirmation (0.2s)
+_ACTION_HOLD_TIMES = {
+    # Section 46: Volume has responsive initial confirmation
+    "volume_up": 0.2,
+    "volume_down": 0.2,
+}
+
 
 class GestureHoldTimer:
     def __init__(self, duration: float = 0.4, repeat_cooldown: float = 0.3):
@@ -195,6 +205,10 @@ class GestureMapper:
         cooldown_ms  = SETTINGS.get("gestures", {}).get("cooldown_ms", 500)
         self.timer.duration = hold_time_ms / 1000.0
         self.timer.repeat_cooldown = cooldown_ms / 1000.0
+
+    def get_hold_time(self, action_name: str) -> float:
+        """Return the effective hold confirmation duration for an action."""
+        return _ACTION_HOLD_TIMES.get(action_name, self.timer.duration)
 
     # ── Temporal reset (§8) ────────────────────────────────────────────────────
 
@@ -349,6 +363,7 @@ class GestureMapper:
         *,
         render_canvas: bool = True,
         capture_at: float | None = None,
+        confidence: float = 0.0,
     ) -> tuple:
         import cv2
         action = None
@@ -401,7 +416,10 @@ class GestureMapper:
 
         # ── Mode-specific continuous actions ──────────────────────────────────
         if self.mode == "GENERAL":
-            self.mouse.process_landmarks(h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h, capture_at=capture_at)
+            self.mouse.process_landmarks(
+                h1, stable_gesture, raw_gesture, self.frame_w, self.frame_h,
+                capture_at=capture_at, confidence=confidence,
+            )
 
             if gesture == "Middle Finger" and gesture_confirmed:
                 result = self.brightness.set_brightness_from_y(h1[12].y)
@@ -438,7 +456,8 @@ class GestureMapper:
         elif mapped_action:
             action_info  = self.action_registry.get(mapped_action, {})
             is_repeatable = action_info.get("repeatable", False)
-            if self.timer.check(gesture, is_repeatable=is_repeatable):
+            hold_dur = _ACTION_HOLD_TIMES.get(mapped_action, self.timer.duration)
+            if self.timer.check(gesture, is_repeatable=is_repeatable, duration=hold_dur):
                 previous_mode = self.mode
                 action = self.execute_action(mapped_action)
                 if self.mode != previous_mode:

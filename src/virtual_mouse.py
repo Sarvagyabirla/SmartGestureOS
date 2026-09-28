@@ -26,6 +26,7 @@ class VirtualMouse:
     def __init__(self, min_cutoff=0.8, beta=0.2, deadzone=1.5):
         self.smoother = PointSmoother(min_cutoff=min_cutoff, beta=beta)
         self.deadzone = deadzone
+        self.active_roi_margin = 0.20
         try:
             monitors = screeninfo.get_monitors()
             primary = next((m for m in monitors if getattr(m, 'is_primary', False)), monitors[0])
@@ -48,21 +49,77 @@ class VirtualMouse:
 
         # Pre-load windll to avoid lookup overhead
         self.user32 = ctypes.windll.user32
-        
+
+    def get_cursor_pos(self) -> tuple[int, int]:
+        """Query current cursor position.
+
+        Prefers self.last_pos if VirtualMouse has an active tracked position;
+        otherwise queries OS GetCursorPos or falls back to screen center.
+        """
+        if self.last_pos is not None:
+            return self.last_pos
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+        pt = POINT()
+        try:
+            if self.user32.GetCursorPos(ctypes.byref(pt)):
+                return (int(pt.x), int(pt.y))
+        except Exception:
+            pass
+        return (self.screen_w // 2, self.screen_h // 2)
+
+    def seed_smoother(self, screen_x: float, screen_y: float) -> None:
+        """Seed the One-Euro filter from a known screen position.
+
+        Section 31: On drag start or transition, primes the filter so that
+        the first drag movement starts smoothly from the current cursor position
+        or click anchor without any first-frame jump.
+        """
+        t = time.perf_counter()
+        self.smoother.reset()
+        self.smoother.update(t, screen_x, screen_y)
+        self.last_pos = (int(round(screen_x)), int(round(screen_y)))
+
     def map_coordinates(self, x, y, cam_w, cam_h):
+        """Map camera pixel coordinates to primary monitor screen coordinates.
+
+        Section 14-16: Uses normalized ROI defined by active_roi_margin.
+        Inside the central region, coordinates map linearly for precision.
+        Near ROI edges, a smooth continuous soft-extension (tanh shaping)
+        ensures screen edges are reachable without a harsh clamp cliff.
+        """
+        import math
         cam_w = max(1, cam_w)
         cam_h = max(1, cam_h)
-        # Screen Coordinate Normalization (Active center area)
-        active_w = cam_w * 0.6
-        active_h = cam_h * 0.6
-        margin_x = (cam_w - active_w) / 2
-        margin_y = (cam_h - active_h) / 2
-        
-        mapped_x = max(0, min(x - margin_x, active_w))
-        mapped_y = max(0, min(y - margin_y, active_h))
-        
-        screen_x = (mapped_x / active_w) * self.screen_w
-        screen_y = (mapped_y / active_h) * self.screen_h
+        margin = getattr(self, "active_roi_margin", 0.20)
+        margin = max(0.05, min(0.40, float(margin)))
+        active_span = 1.0 - 2.0 * margin
+
+        # Normalized camera coordinates [0, 1]
+        nx = max(0.0, min(1.0, x / cam_w))
+        ny = max(0.0, min(1.0, y / cam_h))
+
+        # Map to active range [-0.5, 0.5] centered
+        cx = (nx - 0.5) / active_span
+        cy = (ny - 0.5) / active_span
+
+        # Soft edge shaping: linear in [-0.45, 0.45], smooth gain near edges
+        def _soft_edge(v: float) -> float:
+            if v > 0.5:
+                return 0.5 + 0.05 * math.tanh((v - 0.5) / 0.05)
+            elif v < -0.5:
+                return -0.5 + 0.05 * math.tanh((v + 0.5) / 0.05)
+            return v
+
+        mapped_u = _soft_edge(cx) + 0.5
+        mapped_v = _soft_edge(cy) + 0.5
+
+        # Clamp to valid screen bounds [0, 1]
+        mapped_u = max(0.0, min(1.0, mapped_u))
+        mapped_v = max(0.0, min(1.0, mapped_v))
+
+        screen_x = mapped_u * self.screen_w
+        screen_y = mapped_v * self.screen_h
         return screen_x, screen_y
         
     def move(self, x, y, cam_w, cam_h):

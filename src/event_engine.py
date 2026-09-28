@@ -68,12 +68,9 @@ class EventEngine:
         self.last_state_change = time.perf_counter()
 
         self.scroll_start_y = None
+        self._scroll_anchor_y = None
+        self._scroll_deadzone_cleared = False
         self.scroll_accumulator = 0.0
-        # Scroll intent hysteresis. A single dropped classifier frame used to
-        # end SCROLLING and zero the accumulator, so one noisy "Two Fingers"
-        # read permanently truncated a real scroll. Bounded grace tolerates
-        # classifier uncertainty only; a genuinely conflicting pose still
-        # stops scrolling on the same frame.
         self._scroll_last_confirmed_at = 0.0
         self.scroll_exit_grace_s = 0.12
 
@@ -81,16 +78,18 @@ class EventEngine:
         self.pinch_release_time = 0.0
         self._pinch_consumed = False
         self._second_pinch_pending = False
+        self.click_anchor = None
+        self.last_click_time = 0.0
+        self.last_click_pos = None
 
-        # F-06 FIX: track whether right-click gesture was released before re-arming
+        # F-06 FIX: right-click release gate and short deliberate confirmation
         self._right_click_armed = True  # True = ready to fire right-click
+        self._three_fingers_start_time = 0.0
 
         # Configuration (updated by settings callback in MouseController)
-        # Double-click window is derived from the Windows mouse interval rather
-        # than hardcoded; see gesture_double_click_window_ms().
         self.double_click_window_ms = gesture_double_click_window_ms() / 1000.0
         self.drag_hold_ms = 350 / 1000.0
-        self.cooldown_duration = 150 / 1000.0
+        self.cooldown_duration = 100 / 1000.0
 
     def _change_state(self, new_state: EventState) -> None:
         if self.state != new_state:
@@ -106,6 +105,11 @@ class EventEngine:
         self.pinch_release_time = 0.0
         self._pinch_consumed = False
         self._second_pinch_pending = False
+        self.click_anchor = None
+        self.last_click_pos = None
+        self._three_fingers_start_time = 0.0
+        self._scroll_anchor_y = None
+        self._scroll_deadzone_cleared = False
         self.scroll_start_y = None
         self.scroll_accumulator = 0.0
         self._scroll_last_confirmed_at = 0.0
@@ -131,6 +135,7 @@ class EventEngine:
         frame_h: int,
         lms_list=None,
         scale_factor: float = 1.0,
+        confidence: float = 0.0,
     ) -> None:
         now = time.perf_counter()
         # Raw Pinch already has geometric enter/release hysteresis in the
@@ -153,22 +158,23 @@ class EventEngine:
                 return  # Still lost; do nothing
 
         # ── Drag cursor ───────────────────────────────────────────────────────
-        # Cursor *navigation* is no longer this engine's job: it lived in
-        # MouseController.process_pointer so a transient raw pose could not
-        # freeze the cursor, and so a slow discrete action could not stall it.
-        # A held drag is different — the left button is down, so the target
-        # must follow the fingertip and must be dropped on release.
-        if self.state == EventState.DRAGGING and is_pinching:
-            self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
+        if self.state == EventState.DRAGGING:
+            if is_pinching:
+                self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
+            else:
+                self.mouse.mouse.drag(start=False)
+                self._change_state(EventState.COOLDOWN)
 
         # ── F-06 FIX: right-click release gate ────────────────────────────────
-        # Re-arm right-click only after Three Fingers gesture is released
         if stable_gesture != "Three Fingers" and raw_gesture != "Three Fingers":
             self._right_click_armed = True
+            self._three_fingers_start_time = 0.0
 
         # ── State transitions ──────────────────────────────────────────────────
         if self.state == EventState.HOVER:
-            if is_pinching and can_start_action and not self._pinch_consumed:
+            if is_pinching and (can_start_action or confidence >= 50.0) and not self._pinch_consumed:
+                # Section 28: Anchor cursor on pinch onset to eliminate click target drift
+                self.click_anchor = self.mouse.mouse.get_cursor_pos()
                 self.pinch_down_time = now
                 self._change_state(EventState.PINCH_DOWN)
 
@@ -176,13 +182,11 @@ class EventEngine:
                 y = lms_list[8].y if lms_list else float("nan")
                 self.scroll_start_y = y if math.isfinite(y) and 0.0 <= y <= 1.0 else None
                 self.scroll_accumulator = 0.0
-                # Stamp the entry frame, otherwise the first uncertain frame
-                # would compare against a stale zero and end the scroll.
                 self._scroll_last_confirmed_at = now
                 self._change_state(EventState.SCROLLING)
 
             elif stable_gesture == raw_gesture == "Three Fingers" and self._right_click_armed:
-                # F-06 FIX: fire once, then require release before re-arming
+                # Section 38: Discrete right-click on stable Three Fingers
                 self.mouse.mouse.click(button="right")
                 self._right_click_armed = False
                 self._change_state(EventState.COOLDOWN)
@@ -190,31 +194,50 @@ class EventEngine:
         elif self.state == EventState.PINCH_DOWN:
             hold_duration = now - self.pinch_down_time
             if not is_pinching:
-                if self._second_pinch_pending and hold_duration < self.drag_hold_ms:
-                    # The second pinch began in the window and stayed short.
-                    self.mouse.mouse.double_click()
+                # Section 25 & 26: Immediate single click on pinch release!
+                # Windows natively forms a double click if two clicks occur close in time.
+                self.mouse.mouse.click(button="left")
+                self.pinch_release_time = now
+                self.last_click_time = now
+                self.last_click_pos = self.click_anchor
+                self._pinch_consumed = True
+                if self._second_pinch_pending:
                     self._second_pinch_pending = False
-                    self._pinch_consumed = True
                     self._change_state(EventState.COOLDOWN)
                 else:
-                    if self._second_pinch_pending:
-                        # The second pinch lasted too long for a double click,
-                        # but no held sample began a drag before this release.
-                        self.mouse.mouse.click(button="left")
-                        self._second_pinch_pending = False
-                    # No button was pressed while still in PINCH_DOWN. A release
-                    # first observed after the hold deadline must not swallow
-                    # the click; only a held sample can start an actual drag.
-                    self.pinch_release_time = now
                     self._change_state(EventState.PINCH_RELEASE_WAIT)
             else:
-                if hold_duration >= self.drag_hold_ms:
+                # Section 32: Adaptive drag intent (motion-based or hold-based)
+                mapped = getattr(self.mouse.mouse, "map_coordinates", None)
+                if callable(mapped):
+                    try:
+                        res = mapped(index_x, index_y, frame_w, frame_h)
+                        screen_x, screen_y = res if isinstance(res, (tuple, list)) and len(res) == 2 else (index_x, index_y)
+                    except Exception:
+                        screen_x, screen_y = index_x, index_y
+                else:
+                    screen_x, screen_y = index_x, index_y
+
+                anchor = self.click_anchor
+                if isinstance(anchor, (tuple, list)) and len(anchor) == 2:
+                    anchor_x, anchor_y = anchor
+                else:
+                    anchor_x, anchor_y = screen_x, screen_y
+                displacement = math.hypot(screen_x - anchor_x, screen_y - anchor_y)
+
+                is_drag_motion = (hold_duration >= 0.12 and displacement >= 16.0)
+                is_drag_hold = (hold_duration >= self.drag_hold_ms)
+
+                if is_drag_motion or is_drag_hold:
                     if self._second_pinch_pending:
-                        # The second pinch started in the double-click window,
-                        # then became a hold. Complete the first click before
-                        # beginning the drag.
-                        self.mouse.mouse.click(button="left")
                         self._second_pinch_pending = False
+                    # Section 31: Seed smoother from click anchor for smooth drag start (no snap)
+                    seed_func = getattr(self.mouse.mouse, "seed_smoother", None)
+                    if callable(seed_func):
+                        try:
+                            seed_func(anchor_x, anchor_y)
+                        except Exception:
+                            pass
                     self.mouse.mouse.drag(start=True)
                     self._change_state(EventState.DRAGGING)
                     self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
@@ -222,26 +245,18 @@ class EventEngine:
         elif self.state == EventState.PINCH_RELEASE_WAIT:
             if is_pinching:
                 if now - self.pinch_release_time <= self.double_click_window_ms:
-                    # Wait for the second release to distinguish a short pinch
-                    # from a hold that should become a drag.
                     self._second_pinch_pending = True
+                    self.click_anchor = self.mouse.mouse.get_cursor_pos()
                     self.pinch_down_time = now
                     self._change_state(EventState.PINCH_DOWN)
                 else:
-                    # The first click expired. Commit it and treat this as a
-                    # fresh pinch so it can become its own click or drag.
-                    self.mouse.mouse.click(button="left")
+                    self.click_anchor = self.mouse.mouse.get_cursor_pos()
                     self.pinch_down_time = now
+                    self._second_pinch_pending = False
                     self._change_state(EventState.PINCH_DOWN)
             elif now - self.pinch_release_time > self.double_click_window_ms:
-                # Window elapsed — perform single click
-                self.mouse.mouse.click(button="left")
+                # Window expired; first click was already emitted immediately
                 self._change_state(EventState.HOVER)
-
-        elif self.state == EventState.DRAGGING:
-            if not is_pinching:
-                self.mouse.mouse.drag(start=False)
-                self._change_state(EventState.COOLDOWN)
 
         elif self.state == EventState.SCROLLING:
             if is_scrolling:
@@ -253,10 +268,6 @@ class EventEngine:
                     and (now - self._scroll_last_confirmed_at) <= self.scroll_exit_grace_s
                 )
                 if within_grace:
-                    # Discard the gap. Re-anchoring to the current hand
-                    # position means resuming cannot replay the unobserved
-                    # motion as a wheel jump. Nothing accumulates or emits
-                    # while the pose is uncertain.
                     if lms_list:
                         grace_y = lms_list[8].y
                         self.scroll_start_y = (
@@ -277,12 +288,13 @@ class EventEngine:
                 if self.scroll_start_y is not None:
                     scale = scale_factor if math.isfinite(scale_factor) and scale_factor > 0 else 1.0
                     scale = min(4.0, max(0.25, scale))
-                    self.scroll_accumulator += (current_y - self.scroll_start_y) * scale
+                    dy = (current_y - self.scroll_start_y) * scale
+                    self.scroll_accumulator += dy
+
+                    # Section 36: Velocity-sensitive scroll with bound (-3 <= ticks <= 3)
                     scroll_threshold = 0.03
                     ticks = math.trunc(self.scroll_accumulator / scroll_threshold)
                     if ticks:
-                        # One bounded Windows event per frame. Discard excess
-                        # whole ticks so an outlier cannot queue future scroll.
                         self.mouse.mouse.scroll(-max(-3, min(3, ticks)))
                         self.scroll_accumulator -= ticks * scroll_threshold
                 self.scroll_start_y = current_y

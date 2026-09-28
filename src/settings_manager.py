@@ -26,18 +26,23 @@ _WINDOWS_RESERVED_NAMES = frozenset({
 })
 
 # Complete, conservative startup settings if the packaged defaults are damaged.
-# Empty action maps keep camera/mouse operation available without inventing actions.
+# Canonical production defaults match config/defaults.json.
 _SAFE_DEFAULTS = {
     "profile_name": "default",
     "camera": {"index": 0, "width": 1280, "height": 720, "fps": 30},
-    "gestures": {"sensitivity": 0.7, "cooldown_ms": 500, "smoothing": 2,
-                 "hold_time_ms": 300, "base_hand_size": 1.0},
+    "gestures": {
+        "sensitivity": 0.75, "cooldown_ms": 500, "smoothing": 2,
+        "hold_time_ms": 300, "base_hand_size": 1.0,
+        "pointer_enter_samples": 2, "pointer_grace_ms": 100.0,
+    },
     "ui": {"theme": "dark", "color_theme": "blue"},
     "mappings": {"GENERAL": {}, "MEDIA": {}, "DRAW": {}},
-    "calibration": {"confidence_threshold": 50.0, "hand_size_baseline": 1.0,
-                    "pointer_extension_ratio": 0.4, "pinch_enter_threshold": 0.45,
-                    "pinch_release_threshold": 0.6, "two_finger_max_spacing": 0.2,
-                    "victory_min_spacing": 0.35, "active_roi_margin": 0.2},
+    "calibration": {
+        "confidence_threshold": 35.0, "hand_size_baseline": 1.0,
+        "pointer_extension_ratio": 0.4, "pinch_enter_threshold": 0.45,
+        "pinch_release_threshold": 0.6, "two_finger_max_spacing": 0.22,
+        "victory_min_spacing": 0.30, "active_roi_margin": 0.2
+    },
 }
 
 _NUMBER_RULES = {
@@ -45,7 +50,9 @@ _NUMBER_RULES = {
                "height": (1, 4320, True), "fps": (1, 240, True)},
     "gestures": {"sensitivity": (0.1, 1, False), "smoothing": (1, 20, True),
                  "hold_time_ms": (1, 10000, True), "cooldown_ms": (0, 10000, True),
-                 "base_hand_size": (0.000001, 1, False)},
+                 "base_hand_size": (0.000001, 1, False),
+                 "pointer_enter_samples": (1, 10, True),
+                 "pointer_grace_ms": (50.0, 500.0, False)},
     "calibration": {"confidence_threshold": (0, 100, False),
                     "hand_size_baseline": (0.000001, 1, False),
                     "pointer_extension_ratio": (0, 2, False),
@@ -184,6 +191,56 @@ class SettingsManager:
             profiles.append("default")
         return sorted(set(profiles))
 
+    @staticmethod
+    def _migrate_profile_data(data: dict) -> bool:
+        """Safely migrate legacy factory defaults in existing profiles.
+
+        Section 7: If an old profile contains old factory values rather than
+        deliberate custom values, safely migrate them to the new recommended
+        values. Preserves custom gesture mappings, camera selection, and UI theme.
+        Returns True if any migration modification was made.
+        """
+        if not isinstance(data, dict):
+            return False
+        changed = False
+        calib = data.setdefault("calibration", {})
+        gestures = data.setdefault("gestures", {})
+
+        # Stale factory default confidence_threshold was 50.0 (blocks relaxed poses)
+        if calib.get("confidence_threshold") == 50.0:
+            calib["confidence_threshold"] = 35.0
+            changed = True
+
+        # Stale factory default two_finger_max_spacing was 0.2
+        if calib.get("two_finger_max_spacing") == 0.2:
+            calib["two_finger_max_spacing"] = 0.22
+            changed = True
+
+        # Stale factory default victory_min_spacing was 0.35
+        if calib.get("victory_min_spacing") == 0.35:
+            calib["victory_min_spacing"] = 0.30
+            changed = True
+
+        # Missing pointer entry/grace settings
+        if "pointer_enter_samples" not in gestures:
+            gestures["pointer_enter_samples"] = 2
+            changed = True
+        if "pointer_grace_ms" not in gestures:
+            gestures["pointer_grace_ms"] = 100.0
+            changed = True
+
+        return changed
+
+    def reset_control_settings_to_recommended(self) -> bool:
+        """Reset pointer, gestures, and calibration to recommended defaults.
+
+        Preserves custom gesture mappings, camera selection, and UI theme.
+        """
+        defaults = self._get_default_settings()
+        self.settings["gestures"] = deepcopy(defaults["gestures"])
+        self.settings["calibration"] = deepcopy(defaults["calibration"])
+        return self.save_profile()
+
     def load_profile(self, profile_name: str, *, create_missing: bool = True) -> bool:
         # F-09 FIX: validate before building path
         valid, reason = validate_profile_name(profile_name)
@@ -199,6 +256,15 @@ class SettingsManager:
                     data = json.load(f)
                 merged = self._merge_dicts(self._get_default_settings(), data)
                 validate_settings(merged)
+                if self._migrate_profile_data(data):
+                    logger.info("Migrated legacy factory defaults in profile '%s'", profile_name)
+                    try:
+                        tmp_m = path.with_suffix(".tmp")
+                        with open(tmp_m, "w", encoding="utf-8") as f_out:
+                            json.dump(data, f_out, indent=4)
+                        tmp_m.replace(path)
+                    except OSError:
+                        pass
                 merged["profile_name"] = profile_name
                 self.settings.clear()
                 self.settings.update(merged)
