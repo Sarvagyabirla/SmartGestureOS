@@ -48,75 +48,174 @@ _ASYNC_ACTIONS = frozenset({
     "save_drawing",
 })
 
-# Action-specific hold times (Section 44 & 45):
-# High-impact / dangerous actions require deliberate confirmation (0.5 - 0.6s)
-# Normal discrete actions take default hold (0.25 - 0.3s)
-# Volume has responsive initial confirmation (0.2s)
-_ACTION_HOLD_TIMES = {
-    # Section 46: Volume has responsive initial confirmation
-    "volume_up": 0.2,
-    "volume_down": 0.2,
+# Action-specific policies (Section 20 & 21):
+# Centralized action timing, dropout grace, and release gating policy table.
+_ACTION_POLICY = {
+    # Fast discrete (volume / right click): 200 ms
+    "volume_up": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": False, "repeatable": True},
+    "volume_down": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": False, "repeatable": True},
+    "right_click": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "play_pause": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "next_track": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "previous_track": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "mute_master": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+
+    # Normal discrete: 300 ms
+    "undo": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "redo": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "cycle_color": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "toggle_eraser": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+
+    # High impact discrete: 300 ms (Section 20)
+    "screenshot": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "open_vscode": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "open_chrome": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "task_view": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "show_desktop": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "lock_pc": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "switch_mode": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "save_drawing": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "clear_canvas": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "toggle_sleep": {"hold_ms": 3000, "dropout_grace_ms": 150, "require_release": True, "repeatable": False},
 }
 
+_DEFAULT_ACTION_POLICY = {
+    "hold_ms": 300,
+    "dropout_grace_ms": 120,
+    "require_release": True,
+    "repeatable": False,
+}
 
-class GestureHoldTimer:
-    def __init__(self, duration: float = 0.4, repeat_cooldown: float = 0.3):
+def _get_action_policy(action_name: str) -> dict:
+    return _ACTION_POLICY.get(action_name, _DEFAULT_ACTION_POLICY)
+
+
+class GestureIntentGate:
+    """
+    GestureIntentGate (also exposed as GestureHoldTimer for backwards compatibility).
+
+    Tracks discrete gesture intent with:
+      - Dropout grace (80-150ms) through transient Unknown / ambiguous raw frames
+      - Immediate cancellation on explicit conflicting raw gesture
+      - Intent release gating (requires neutral/release before re-triggering)
+      - Action-specific hold policies from _ACTION_POLICY
+    """
+    def __init__(self, duration: float = 0.3, repeat_cooldown: float = 0.3, dropout_grace: float = 0.12):
         self.duration = duration
         self.repeat_cooldown = repeat_cooldown
+        self.dropout_grace = dropout_grace
         self.target_gesture: str | None = None
+        self.target_action: str | None = None
         self.start_time: float = 0.0
+        self.last_confirmed: float = 0.0
         self.last_executed: float = 0.0
         self.executed_once: bool = False
         self.target_duration: float = duration
 
     def reset(self) -> None:
         self.target_gesture = None
+        self.target_action = None
         self.start_time = 0.0
+        self.last_confirmed = 0.0
         self.last_executed = 0.0
         self.executed_once = False
         self.target_duration = self.duration
 
-    def get_progress(self) -> float:
+    def cancel(self) -> None:
+        self.reset()
+
+    def get_progress(self, now: float | None = None) -> float:
         if (
             not self.target_gesture
             or self.target_gesture in ("None", "Unknown")
             or self.executed_once
+            or self.start_time <= 0
         ):
             return 0.0
-        now = time.perf_counter()
-        progress = (now - self.start_time) / max(1e-6, self.target_duration)
-        return max(0.0, min(1.0, progress))
+        if now is None:
+            now = time.perf_counter()
+        elapsed = now - self.start_time
+        if self.target_duration <= 0:
+            return 1.0
+        return max(0.0, min(1.0, elapsed / self.target_duration))
 
-    def check(self, gesture: str | None, is_repeatable: bool = False,
-               duration: float | None = None) -> bool:
-        """Confirm a held gesture.
+    def check(
+        self,
+        gesture: str | None,
+        is_repeatable: bool = False,
+        duration: float | None = None,
+        *,
+        raw_gesture: str | None = None,
+        action_name: str | None = None,
+        now: float | None = None,
+        dropout_grace: float | None = None,
+    ) -> bool:
+        if now is None:
+            now = time.perf_counter()
+        effective_dur = self.duration if duration is None else float(duration)
+        effective_grace = self.dropout_grace if dropout_grace is None else float(dropout_grace)
 
-        ``duration`` overrides the default hold for this action. A single
-        universal hold time is wrong for a mixed action set: the cursor and
-        scroll are continuous and effectively immediate, pinch has its own
-        EventEngine timing, volume wants a short confirmation plus repeat,
-        and high-impact actions (Lock PC, screenshot, app launches) want
-        much stronger confirmation.
-        """
-        effective = self.duration if duration is None else float(duration)
+        # 1. Explicit conflicting raw gesture cancellation (§18)
+        if (
+            self.target_gesture is not None
+            and raw_gesture is not None
+            and raw_gesture not in (None, "None", "Unknown", "")
+            and raw_gesture != self.target_gesture
+        ):
+            self.reset()
+            return False
+
+        # 2. Gesture is None or Unknown (dropout or release)
         if not gesture or gesture in ("None", "Unknown"):
+            if self.executed_once:
+                # Action already consumed. It remains latched until raw gesture actually releases!
+                if raw_gesture == self.target_gesture:
+                    return False
+                # User has physically released the gesture
+                self.reset()
+                return False
+
+            if (
+                self.target_gesture is not None
+                and not self.executed_once
+                and self.last_confirmed > 0
+                and (now - self.last_confirmed) <= effective_grace
+                and (raw_gesture in (None, "None", "Unknown", "") or raw_gesture == self.target_gesture)
+            ):
+                # Within dropout grace period: preserve intent hold
+                return False
+            # Beyond grace or genuine release
             self.target_gesture = None
             self.executed_once = False
             return False
 
+        # 3. Gesture is a new named gesture
         if gesture != self.target_gesture:
             self.target_gesture = gesture
-            self.target_duration = effective
-            self.start_time = time.perf_counter()
+            self.target_action = action_name
+            self.target_duration = effective_dur
+            self.start_time = now
+            self.last_confirmed = now
             self.last_executed = 0.0
             self.executed_once = False
             return False
 
+        # 4. Same target gesture: check raw confirmation vs dropout
+        if raw_gesture is not None:
+            if raw_gesture == gesture:
+                self.last_confirmed = now
+            elif raw_gesture in (None, "None", "Unknown", ""):
+                if self.last_confirmed > 0 and (now - self.last_confirmed) > effective_grace:
+                    self.reset()
+                    return False
+        else:
+            self.last_confirmed = now
+
+        # 5. Release gating: non-repeatable action cannot fire again until released
         if not is_repeatable and self.executed_once:
             return False
 
-        now = time.perf_counter()
-
+        # 6. Check hold duration / repeat cooldown
         if not self.executed_once:
             if now - self.start_time >= self.target_duration:
                 self.last_executed = now
@@ -128,6 +227,10 @@ class GestureHoldTimer:
                 return True
 
         return False
+
+
+# Backward compatibility alias
+GestureHoldTimer = GestureIntentGate
 
 
 class GestureMapper:
@@ -208,7 +311,9 @@ class GestureMapper:
 
     def get_hold_time(self, action_name: str) -> float:
         """Return the effective hold confirmation duration for an action."""
-        return _ACTION_HOLD_TIMES.get(action_name, self.timer.duration)
+        if action_name in _ACTION_POLICY:
+            return _ACTION_POLICY[action_name]["hold_ms"] / 1000.0
+        return self.timer.duration
 
     # ── Temporal reset (§8) ────────────────────────────────────────────────────
 
@@ -382,8 +487,18 @@ class GestureMapper:
         if raw_gesture != self._mode_switch_gesture:
             self._mode_switch_gesture = None
         mode_switch_held = self._mode_switch_gesture is not None
-        conflicting_raw = (raw_gesture != gesture and raw_gesture not in (None, "None", "Unknown", ""))
-        gesture_confirmed = (gesture not in (None, "None", "Unknown", "")) and not mode_switch_held and not conflicting_raw
+        target = self.timer.target_gesture
+        known_stable = gesture not in (None, "None", "Unknown", "")
+        raw_is_explicit = raw_gesture not in (None, "None", "Unknown", "")
+
+        conflicting_raw = False
+        if raw_is_explicit:
+            if known_stable and raw_gesture != gesture:
+                conflicting_raw = True
+            elif not known_stable and target is not None and raw_gesture != target:
+                conflicting_raw = True
+
+        gesture_confirmed = known_stable and not mode_switch_held and not conflicting_raw
 
 
         # ── Sleep / wake ──────────────────────────────────────────────────────
@@ -445,19 +560,37 @@ class GestureMapper:
 
         # ── Discrete actions ──────────────────────────────────────────────────
         if not gesture_confirmed:
-            # Confidence loss cancels an unfinished hold. An action already
-            # consumed remains latched until its raw gesture actually releases.
-            if raw_gesture != self.timer.target_gesture or not self.timer.executed_once:
-                self.timer.check(None)
-            progress = 0.0
+            if conflicting_raw:
+                # Explicit conflicting gesture cancels immediately (§18)
+                self.timer.reset()
+                progress = 0.0
+            else:
+                # Confidence loss / dropout: check with timer for grace or latching
+                self.timer.check(None, raw_gesture=raw_gesture)
+                progress = self.timer.get_progress()
         elif mapped_action == "toggle_sleep":
-            self.timer.check(None)
+            self.timer.reset()
+            if self.sleep_timer.check(sleep_gesture, raw_gesture=raw_gesture):
+                self.is_sleeping = not self.is_sleeping
+                self.feedback.speak("Sleeping" if self.is_sleeping else "Waking up")
+                self.mouse.release_all()
+                return frame, ("System Sleeping" if self.is_sleeping else "System Woke Up"), 1.0
             progress = self.sleep_timer.get_progress()
         elif mapped_action:
-            action_info  = self.action_registry.get(mapped_action, {})
-            is_repeatable = action_info.get("repeatable", False)
-            hold_dur = _ACTION_HOLD_TIMES.get(mapped_action, self.timer.duration)
-            if self.timer.check(gesture, is_repeatable=is_repeatable, duration=hold_dur):
+            policy = _get_action_policy(mapped_action)
+            action_info = self.action_registry.get(mapped_action, {})
+            is_repeatable = policy.get("repeatable", action_info.get("repeatable", False))
+            hold_dur = policy["hold_ms"] / 1000.0
+            dropout_grace = policy["dropout_grace_ms"] / 1000.0
+
+            if self.timer.check(
+                gesture,
+                raw_gesture=raw_gesture,
+                is_repeatable=is_repeatable,
+                duration=hold_dur,
+                dropout_grace=dropout_grace,
+                action_name=mapped_action,
+            ):
                 previous_mode = self.mode
                 action = self.execute_action(mapped_action)
                 if self.mode != previous_mode:
@@ -468,7 +601,7 @@ class GestureMapper:
                     return frame, action, 1.0
             progress = self.timer.get_progress()
         else:
-            self.timer.check(None)
+            self.timer.reset()
             progress = 0.0
 
         return frame, action, progress

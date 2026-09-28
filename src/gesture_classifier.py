@@ -29,6 +29,12 @@ Physical failure root-cause fixes (user-report: "almost ALL gestures fail"):
 5. Closed Fist matched when fingers[1:] == [0,0,0,0] even if the thumb was
    extended — this conflated Thumb Up with Closed Fist.  Fixed by adding a
    thumb check: Closed Fist requires the thumb to NOT be clearly extended.
+
+6. Four Fingers / Open Palm discrimination (physical fix):
+   The thumb state is now represented as a CONTINUOUS score (0-1) rather than
+   a binary 0/1.  This prevents single-frame thumb flicker from toggling
+   between gestures.  A hysteresis band around the midpoint lets the last
+   strongly-held gesture persist through brief ambiguity.
 """
 import numpy as np
 import time
@@ -52,7 +58,7 @@ class GestureClassifier:
     Note on hold_time_ms (F-12 fix):
         hold_time_ms is NOT a classifier concern. The classifier answers
         "what does the geometry look like?" The action hold/intent layer lives
-        in GestureHoldTimer inside GestureMapper.
+        in GestureIntentGate inside GestureMapper.
     """
     def __init__(self, confidence_threshold: float = 35.0):
         self.tip_ids = [4, 8, 12, 16, 20]
@@ -81,6 +87,12 @@ class GestureClassifier:
         self.last_stable_gesture = "None"
         self.last_raw_gesture = "None"
         self.is_pinching = False
+
+        # ── Four Fingers / Open Palm hysteresis (Fix #6) ──────────────────────
+        # Tracks the last strongly-resolved palm-type gesture so that one-frame
+        # thumb ambiguity does not immediately flip the label.
+        # Values: "Four Fingers", "Open Palm", or None (not yet set).
+        self._last_palm_type: str | None = None
 
         from src.settings_manager import settings_manager
         settings_manager.register_callback(self.on_settings_changed)
@@ -136,6 +148,7 @@ class GestureClassifier:
         self.last_raw_gesture = "Unknown"
         self.is_pinching = False
         self.confidence_ema = 0.0
+        self._last_palm_type = None
 
     def on_settings_changed(self) -> None:
         """Update calibration thresholds from settings."""
@@ -172,6 +185,94 @@ class GestureClassifier:
         if margin <= 0:
             return 0.0
         return min(100.0, (abs(diff) / (margin * 2.0)) * 100.0)
+
+    def _thumb_extension_score(self, lms_list) -> float:
+        """Return a continuous thumb-extension score in [0, 1].
+
+        0.0 = fully tucked/folded against palm.
+        1.0 = fully extended/abducted away from palm.
+
+        Combines three independent geometric signals so that camera angle,
+        wrist rotation and depth noise each only partially affect the result:
+          A. Thumb-tip distance from palm center (middle MCP), normalised.
+          B. Thumb-tip distance from index MCP (lateral separation).
+          C. Classic signed diff: thumb tip vs thumb MCP vs pinky MCP.
+
+        All distances are normalised by hand_size so the score is scale-free.
+
+        Calibration notes (from synthetic + physical hand analysis):
+          - Real Open Palm: thumb clearly abducted, score typically 0.45–0.80.
+          - Real Four Fingers: thumb tucked against palm, score typically 0.05–0.30.
+          - Ambiguous / uncertain zone: 0.30–0.40 (preserved with hysteresis).
+          - Synthetic test (degenerate MCPs all coincident): sig_a collapses
+            because d_tip_palm is small relative to hand_size; sig_b and sig_c
+            remain the dominant signals.  Thresholds account for this.
+        """
+        wrist      = self.get_3d_point(lms_list[0])
+        thumb_tip  = self.get_3d_point(lms_list[4])
+        thumb_mcp  = self.get_3d_point(lms_list[2])
+        index_mcp  = self.get_3d_point(lms_list[5])
+        middle_mcp = self.get_3d_point(lms_list[9])
+        pinky_mcp  = self.get_3d_point(lms_list[17])
+
+        hand_size = max(1e-6, np.linalg.norm(wrist - middle_mcp))
+
+        # Signal A: tip distance from palm center, normalised.
+        # Extended thumb is ~0.8-1.5 hand_sizes from palm center.
+        # Tucked thumb is ~0.3-0.5 hand_sizes from palm center.
+        d_tip_palm  = np.linalg.norm(thumb_tip - middle_mcp) / hand_size
+        sig_a = np.clip((d_tip_palm - 0.35) / 0.65, 0.0, 1.0)
+
+        # Signal B: lateral separation from index MCP, normalised.
+        # Extended: tip is >0.3 hand_size from index MCP.  Tucked: <0.1.
+        d_tip_idx  = np.linalg.norm(thumb_tip - index_mcp) / hand_size
+        sig_b = np.clip((d_tip_idx - 0.10) / 0.50, 0.0, 1.0)
+
+        # Signal C: classic diff (tip vs mcp vs pinky MCP), normalised.
+        # Positive raw_diff = thumb tip further from pinky MCP than thumb MCP.
+        d_tip_pinky = np.linalg.norm(thumb_tip - pinky_mcp)
+        d_mcp_pinky = np.linalg.norm(thumb_mcp - pinky_mcp)
+        margin = hand_size * 0.12
+        raw_diff = d_tip_pinky - d_mcp_pinky
+        sig_c = np.clip((raw_diff + margin) / (margin * 4.0), 0.0, 1.0)
+
+        # Weighted combination.  B and C are more robust to degenerate geometry.
+        score = 0.30 * sig_a + 0.40 * sig_b + 0.30 * sig_c
+        return float(np.clip(score, 0.0, 1.0))
+
+    def _classify_palm_type(self, lms_list, is_thumb_up: int = 1) -> str:
+        """
+        Distinguish "Four Fingers" from "Open Palm" when all four non-thumb
+        fingers are extended, using a continuous thumb-extension score with a
+        hysteresis dead-band to prevent single-frame flickering.
+
+        Thresholds (calibrated against both synthetic and real webcam hands):
+          is_thumb_up == 0  → Four Fingers (thumb folded/tucked by primary detector)
+          score >= 0.35     → Open Palm (thumb clearly extended/abducted)
+          score <= 0.22     → Four Fingers (thumb tucked despite noisy boundary)
+          0.22 < score < 0.35 → ambiguous zone: preserve previous palm type to
+                                prevent frame-to-frame flipping, or return "Unknown"
+        """
+        if is_thumb_up == 0:
+            self._last_palm_type = "Four Fingers"
+            return "Four Fingers"
+
+        score = self._thumb_extension_score(lms_list)
+
+        OPEN_PALM_MIN   = 0.35  # above this → Open Palm
+        FOUR_FINGER_MAX = 0.22  # below this → Four Fingers
+
+        if score >= OPEN_PALM_MIN:
+            self._last_palm_type = "Open Palm"
+            return "Open Palm"
+        elif score <= FOUR_FINGER_MAX:
+            self._last_palm_type = "Four Fingers"
+            return "Four Fingers"
+        else:
+            # Ambiguous zone — lean on recent history to avoid flicker
+            if self._last_palm_type is not None:
+                return self._last_palm_type
+            return "Unknown"
 
     def fingers_up(self, lms_list):
         if not lms_list or len(lms_list) < 21:
@@ -301,14 +402,22 @@ class GestureClassifier:
 
         # ── GESTURE MATCHING — priority ordered contracts ──────────────────
 
-        # 1. Open Palm — all 5 fingers clearly extended
-        if all(f == 1 for f in fingers):
-            return "Open Palm", shape_score
-
-        # 2. Pinch — thumb tip and index tip touching/near, not curled into fist
+        # 1. Pinch — thumb tip and index tip touching/near, not curled into fist
+        #    (Checked BEFORE palm-type gestures to avoid thumb-state confusion)
         if true_pinch:
             pinch_score = max(0.0, min(100.0, 100.0 - ((pinch_ratio - 0.15) / max(0.01, (release_thresh - 0.15))) * 100.0))
             return "Pinch", pinch_score
+
+        # 2. Four Fingers / Open Palm — all four non-thumb fingers extended.
+        #    Use continuous thumb-extension score with hysteresis (Fix #6).
+        if fingers[1] == 1 and fingers[2] == 1 and fingers[3] == 1 and fingers[4] == 1:
+            palm_type = self._classify_palm_type(lms_list, is_thumb_up=fingers[0])
+            # Compute gesture-specific score: how well all 4 non-thumb fingers fit
+            four_finger_shape = sum(scores[1:]) / 4.0
+            if palm_type == "Unknown":
+                # Hysteresis resolved to Unknown — avoid flickering
+                return "Unknown", 0.0
+            return palm_type, four_finger_shape
 
         # 3. Pointing — index extended, middle/ring/pinky folded (thumb tolerant)
         if fingers[1] == 1 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
@@ -365,32 +474,27 @@ class GestureClassifier:
             three_score = sum(scores[1:]) / 4.0
             return "Three Fingers", three_score
 
-        # 6. Four Fingers: index + middle + ring + pinky extended, thumb folded
-        if fingers[1:] == [1, 1, 1, 1] and fingers[0] == 0:
-            four_score = sum(scores) / 5.0
-            return "Four Fingers", four_score
-
-        # 7. Rock On: index + pinky extended, middle + ring folded (thumb extended)
+        # 6. Rock On: index + pinky extended, middle + ring folded (thumb extended)
         if fingers[0] == 1 and fingers[1] == 1 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 1:
             return "Rock On", shape_score
 
-        # 8. Call Me: thumb + pinky extended, index + middle + ring folded
+        # 7. Call Me: thumb + pinky extended, index + middle + ring folded
         if fingers[0] == 1 and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 1:
             return "Call Me", shape_score
 
-        # 9. Middle Finger: only middle finger extended
+        # 8. Middle Finger: only middle finger extended
         if fingers[1:] == [0, 1, 0, 0]:
             mid_score = (scores[2] + scores[1] + scores[3] + scores[4]) / 4.0
             return "Middle Finger", mid_score
 
-        # 10. Thumb Up / Thumb Down: four non-thumb fingers folded, thumb extended
+        # 9. Thumb Up / Thumb Down: four non-thumb fingers folded, thumb extended
         if fingers[0] == 1 and fingers[1:] == [0, 0, 0, 0]:
             if thumb_pointing_up:
                 return "Thumb Up", shape_score
             elif thumb_pointing_down:
                 return "Thumb Down", shape_score
 
-        # 11. Closed Fist: all non-thumb fingers folded, thumb folded/tucked
+        # 10. Closed Fist: all non-thumb fingers folded, thumb folded/tucked
         if fingers[1:] == [0, 0, 0, 0] and fingers[0] == 0:
             return "Closed Fist", shape_score
 
@@ -403,10 +507,6 @@ class GestureClassifier:
             else:
                 return "Closed Fist", shape_score
 
-        # 12. Four Fingers fallback if thumb was slightly detected
-        if fingers[1:] == [1, 1, 1, 1]:
-            return "Four Fingers", shape_score
-
         # Custom Gestures fallback
         custom_name, custom_dist = gesture_trainer.classify(lms_list, threshold=0.35)
         if custom_name:
@@ -418,6 +518,8 @@ class GestureClassifier:
     def classify(self, hands_data) -> GestureResult:
         if not hands_data:
             self.is_pinching = False
+            # Clear palm hysteresis when hand is lost
+            self._last_palm_type = None
 
         raw_gesture, raw_score = self.raw_classify(hands_data)
 

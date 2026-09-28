@@ -45,18 +45,43 @@ class DesktopController:
         """
         Capture and save a screenshot.
         F-11 FIX: filename uses ms precision + UUID suffix to prevent collisions.
+        Attaches worker thread to active input desktop so background/executor threads
+        do not fail with Windows ERROR_ACCESS_DENIED (5).
         """
+        import ctypes
+        from PIL import ImageGrab, Image
         from src.paths import SCREENSHOTS_DIR
-        from PIL import ImageGrab
 
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         ts_ms = int(time.perf_counter() * 1000)
         suffix = uuid.uuid4().hex[:6]
         filename = SCREENSHOTS_DIR / f"screen_{ts_ms}_{suffix}.png"
 
         try:
-            img = ImageGrab.grab(all_screens=True)
+            # Attach current thread to Windows interactive input desktop
+            try:
+                u32 = ctypes.windll.user32
+                hdesk = u32.OpenInputDesktop(0, False, 0x01FF)
+                if hdesk:
+                    u32.SetThreadDesktop(hdesk)
+                    u32.CloseDesktop(hdesk)
+            except Exception as desk_err:
+                logger.debug(f"Input desktop attachment note: {desk_err}")
+
+            # Capture all screens, falling back to primary screen
+            img = None
+            try:
+                img = ImageGrab.grab(all_screens=True)
+            except Exception:
+                img = ImageGrab.grab()
+
+            if img is None:
+                raise RuntimeError("Screen grab returned None")
+
             img.save(str(filename))
-            if os.path.exists(str(filename)):
+
+            if os.path.exists(str(filename)) and os.path.getsize(str(filename)) > 0:
+                logger.info(f"Screenshot successfully saved: {filename.name} ({filename.stat().st_size} bytes)")
                 return ActionResult(
                     True, "screenshot",
                     f"Saved {filename.name}",
@@ -65,15 +90,15 @@ class DesktopController:
                 )
             return ActionResult(
                 False, "screenshot",
-                "Screenshot saved but file not found",
-                "File not found after save",
+                "Screenshot saved but file not found or empty",
+                "File not found or 0 bytes after save",
                 time.perf_counter(),
             )
         except Exception as e:
             logger.error(f"Screenshot failed: {e}")
             return ActionResult(
                 False, "screenshot",
-                "Screenshot failed",
+                f"Screenshot failed: {e}",
                 str(e),
                 time.perf_counter(),
             )
