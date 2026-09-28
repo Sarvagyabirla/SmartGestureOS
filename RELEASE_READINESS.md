@@ -6,6 +6,7 @@ Updated 29 September 2026: **549 automated tests pass** (0 failures, verified
 clean across compileall, full pytest suite, pip check, and node site release checks).
 
 **Final Product Completion pass completed:**
+
 1. **Architectural bugs resolved**: Completely removed module global scanning (`import main` / `__dict__.values()`) and queue peeking. Built an explicit, thread-safe UI ↔ Backend contract using explicit callbacks and immutable `AppStateSnapshot` data objects.
 2. **Manual mode switching wired**: GENERAL, MEDIA, and DRAW mode buttons are directly wired to `GestureMapper.set_mode()`, resetting active mouse input, temporal states, and cancelling pending actions immediately.
 3. **Sidebar uncluttered**: CPU, RAM, and diagnostic performance counters were moved off the main dashboard into Settings -> Advanced -> Diagnostics, creating a clean, minimal user experience.

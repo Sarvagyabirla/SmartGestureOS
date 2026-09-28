@@ -118,6 +118,7 @@ tracked separately in `RELEASE_READINESS.md`; these changes do not establish
 that the final product is fully validated or published.
 
 ### Documentation
+
 - 2026-09-27: Updated privacy, security, support and website language using
   MediaPipe's published notice that Tasks APIs send performance and usage
   metrics to Google while processing input images on device.
@@ -130,6 +131,7 @@ that the final product is fully validated or published.
   [PRIVACY.md](PRIVACY.md).
 
 ### Reliability and release validation
+
 - Reject invalid camera frames and recover from driver open-state, mirror and
   release exceptions without losing the capture thread.
 - Require raw/stable agreement before starting a pinch action; wait for the
@@ -140,11 +142,13 @@ that the final product is fully validated or published.
   handling. Release workflow now creates a draft pending installer validation.
 
 ### Security
+
 - F-07: Replaced `shell=True` subprocess launches with `shell=False` + explicit exe paths in `ShortcutController`. Chrome and VS Code paths now located via `shutil.which` + known env-var paths. `lock_pc` uses `ctypes.windll.user32.LockWorkStation()` directly.
 - F-09: Added regex allowlist validation for profile names (`SettingsManager`). Rejects path separators, reserved Windows filenames, empty names, and names > 64 characters. Prevents path traversal attacks when loading/saving profiles.
 - F-37: Added gesture name sanitization in `GestureTrainer`. Built-in gesture names (Pinch, Victory, etc.) cannot be overwritten by custom training. Max 50 samples per gesture enforced.
 
 ### Added
+
 - F-14/F-33: `src/version.py` — single authoritative version source for UI, logs, packaging.
 - F-19: GitHub Actions CI/CD workflows: `ci.yml` (test on PR), `build-windows.yml` (PyInstaller), `release.yml` (GitHub Release + installer), `pages.yml` (GitHub Pages).
 - F-22: `LICENSE` (MIT).
@@ -159,6 +163,7 @@ that the final product is fully validated or published.
 - Test: 13 new unit tests covering F-06, F-09, F-37 security fixes and F-12 classifier cleanup.
 
 ### Fixed
+
 - F-01: Added `psutil>=5.9.0` to `requirements.txt` (was missing; caused import error on clean install).
 - F-02: Use `opencv-contrib-python==5.0.0.93` as the single OpenCV wheel in `requirements.txt`; do not install `opencv-python` alongside it.
 - F-03: Replaced `time.time()` with `time.perf_counter()` in `ShortcutController` rate-limiting.
@@ -175,13 +180,15 @@ that the final product is fully validated or published.
 - F-38: Replaced `time.time()` with `time.perf_counter()` in `DrawingCanvas.draw()` for monotonic timing.
 
 ### Removed
+
 - Stale root-level `SmartGesture.spec` (F-20). Canonical spec is `packaging/windows/SmartGesture.spec`.
 
 ---
 
-## [0.8.0] — 2025-09-20 _(pre-production hardening)_
+## [0.8.0] — 2025-09-20 *(pre-production hardening)*
 
-### Added
+### Added (Pre-production)
+
 - Async MediaPipe hand detection pipeline with result TTL.
 - Bounded `frame_queue` to prevent memory growth.
 - `GestureClassifier` EMA confidence scoring.
@@ -192,12 +199,13 @@ that the final product is fully validated or published.
 - `VirtualMouse` deadzone and 1€ filter smoothing.
 - Initial 60 unit tests.
 
-### Fixed
+### Fixed (Pre-production)
+
 - DXVA2 + SBC brightness control on Windows 10/11.
 - Pycaw volume endpoint initialization error handling.
 
 ---
 
-## [0.7.0] — 2025-08-15 _(prototype)_
+## [0.7.0] — 2025-08-15 *(prototype)*
 
 - Initial working prototype: camera → MediaPipe → gesture → mouse.

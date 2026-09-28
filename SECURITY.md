@@ -3,7 +3,7 @@
 ## Supported Versions
 
 | Version | Supported |
-|---------|-----------|
+| :--- | :--- |
 | 0.9.x (current) | ✅ Active |
 | 0.8.x | ⚠️ Patch-only |
 | < 0.8 | ❌ End of life |
@@ -17,6 +17,7 @@ Report security issues privately via GitHub's
 feature ("Report a Vulnerability" button).
 
 You can expect:
+
 - **Acknowledgement** within 48 hours.
 - **Initial assessment** within 7 days.
 - **Patch or mitigation** within 30 days for confirmed high/critical issues.

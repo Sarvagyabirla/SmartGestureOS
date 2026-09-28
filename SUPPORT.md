@@ -6,7 +6,7 @@ SmartGestureOS is a project by Sarvagya Birla, Uday Dangi, and Shantanu Yadav,
 guided by Ms. Ankita Dubey. Use the following support channels:
 
 | Issue Type | Where to Go |
-|------------|-------------|
+| :--- | :--- |
 | Bug report (camera not working, crash, wrong gesture) | [GitHub Issues](https://github.com/Sarvagyabirla/SmartGestureOS/issues) |
 | Feature request | [GitHub Issues](https://github.com/Sarvagyabirla/SmartGestureOS/issues) — label `enhancement` |
 | Question / usage help | [GitHub Issues](https://github.com/Sarvagyabirla/SmartGestureOS/issues) |
@@ -20,7 +20,7 @@ guided by Ms. Ankita Dubey. Use the following support channels:
 
 ## Information to Include in a Bug Report
 
-```
+```text
 OS: Windows 11 22H2 / Windows 10 21H2
 Python: (if running from source)
 Camera: Logitech C920 / Built-in laptop webcam / etc.

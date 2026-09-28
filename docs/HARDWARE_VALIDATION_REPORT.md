@@ -6,7 +6,8 @@
 
 The final product completion pass verified the full live pipeline using the built-in webcam on index 0, MediaPipe `models/hand_landmarker.task` in VIDEO mode, and the rebuilt auto-grading live validator `scripts/validate_all_gestures.py`.
 
-### Measured Live Runtime Performance (`scripts/measure_runtime_performance.py`):
+### Measured Live Runtime Performance (`scripts/measure_runtime_performance.py`)
+
 - **Camera FPS**: 30.8 FPS
 - **Detector FPS**: 27.1 FPS
 - **Inference Latency**: Median 9.8 ms | p95 15.4 ms
@@ -14,7 +15,8 @@ The final product completion pass verified the full live pipeline using the buil
 - **RAM Footprint**: 246.0 MB start -> 212.8 MB end (No leak)
 - **Background Mode CPU**: ~22% lower CPU usage with preview rendered frames suppressed (0 renders vs ~24 FPS).
 
-### Automated Suite:
+### Automated Suite
+
 - `pytest tests/`: **549 passed in 8.8s** (0 failures).
 - `compileall`: Passed cleanly.
 - `pip check`: Clean.
@@ -62,7 +64,7 @@ Measured with `scripts/diagnose_hand_pipeline.py` on the current Windows machine
 These short runs are observations, not controlled performance guarantees.
 
 | Inference input | Inference rate | Detector latency | Camera-to-landmark | Hand frames |
-|---|---:|---:|---:|---:|
+| :--- | ---: | ---: | ---: | ---: |
 | 640 × 360 | 20.42 FPS | 23.20 ms | 33.48 ms | 0 / 123 |
 | 480 × 270 | 11.17 FPS | 77.97 ms | 116.10 ms | 0 / 67 |
 | 320 × 180 | 19.63 FPS | 20.69 ms | 28.49 ms | 2 / 118 |
@@ -82,7 +84,7 @@ Validated on the development Windows machine using camera 0, model
 physical hand in front of the webcam.
 
 | Check | Result |
-|---|---|
+| :--- | :--- |
 | IMAGE mode, original frame | 1 hand; 21 landmarks; 99.7% confidence |
 | IMAGE mode, mirrored / 640x360 / padded 640x640 | 1 hand in each case |
 | IMAGE thresholds 0.5 / 0.4 / 0.3 | 1 hand at each threshold |

@@ -10,6 +10,7 @@
 ## A. ROOT CAUSES & PHYSICAL FIXES
 
 ### 1. Root Causes Analysis
+
 - **Detector**: MediaPipe was functioning in `RunningMode.VIDEO`, but frame dimensions were previously forced to arbitrary ratios instead of preserving native camera aspect ratios.
 - **Finger-State Geometry**: Previous finger-extension detection evaluated a single distance scalar (`y_tip < y_pip`), failing whenever the hand tilted or rotated away from direct camera facing.
 - **Raw Classifier**: A hard deadband existed between Two Fingers (`spacing <= 0.22`) and Victory (`spacing >= 0.30`). Any natural two-finger pose falling between 0.22 and 0.30 was discarded as `Unknown`.
@@ -20,6 +21,7 @@
 - **UI Architecture**: UI components searched `import main` and `__dict__.values()` across module globals. When run as `python main.py`, the module name was `__main__`, causing backend discovery failures and rendering mode buttons inoperative. Furthermore, `GestureTestUI` peeked into private `Queue.queue[0]` internals.
 
 ### 2. Exact Fixes Applied
+
 - **Orientation-Tolerant Finger Geometry**: Rebuilt `fingers_up()` combining MCP-PIP-DIP joint angles (`angle_pip`), relative 3D distances (`d_tip_mcp`, `d_pip_mcp`, `d_tip_wrist`), and normalized hand dimensions.
 - **Pinch & Double-Click Engine**: Removed `can_start_action` requirement on the second pinch in `PINCH_RELEASE_WAIT`; tuned double-click window (`_GESTURE_WINDOW_SCALE = 1.2`, 250–380 ms).
 - **Zero Deadband Classification**: Eliminated gap between Two Fingers and Victory; added explicit angle divergence (`angle_deg >= 16.0` and `divergence_ratio >= 1.35`) for clean separation.
@@ -32,7 +34,7 @@
 ## B. UI ARCHITECTURE
 
 | Item | Result |
-|---|---|
+| :--- | :--- |
 | Removed `import main` discovery | **YES** (0 occurrences in `src/`) |
 | Explicit callback wiring | **YES** (`SmartGestureApp` uses injected providers) |
 | Manual mode buttons (GENERAL, MEDIA, DRAW) | **PASS** (Directly wired to `GestureMapper.set_mode`) |
@@ -58,7 +60,7 @@
 Auto-graded validation run results (`scripts/validate_all_gestures.py`):
 
 | Gesture | Auto-Grade Success | Accuracy | Median Latency |
-|---|---|---|---|
+| :--- | :--- | :--- | :--- |
 | **Pointing** | 5/5 | 100.0% | 120 ms |
 | **Pinch** | 5/5 | 100.0% | 120 ms |
 | **Two Fingers** | 5/5 | 100.0% | 120 ms |
@@ -82,7 +84,7 @@ Auto-graded validation run results (`scripts/validate_all_gestures.py`):
 ## E. MOUSE INTERACTION
 
 | Interaction | Benchmark Target | Measured Result | Status |
-|---|---|---|---|
+| :--- | :--- | :--- | :--- |
 | **Cursor Tracking** | Smooth, fluent | One-Euro filtered (6.0–2.0 Hz band, group delay < 80ms) | **PASS** |
 | **Single Click** | >= 9/10 | 10/10 | **PASS** |
 | **Double Click** | >= 8/10 | 10/10 (EventEngine double-pinch unblocked) | **PASS** |
@@ -135,7 +137,7 @@ Measured via `scripts/measure_runtime_performance.py`:
 ## I. AUTOMATED TEST SUITE
 
 | Suite | Result |
-|---|---|
+| :--- | :--- |
 | `compileall` | **PASS** (0 errors) |
 | `pytest tests/` | **549 PASSED** (0 failures) |
 | `pip check` | **PASS** (No broken requirements) |
@@ -168,7 +170,7 @@ Measured via `scripts/measure_runtime_performance.py`:
 ## L. FINAL GATES EVALUATION
 
 | Gate | Assessment | Verdict |
-|---|---|---|
+| :--- | :--- | :--- |
 | **PHASE 1 (Tracking)** | 21 landmarks, 30.8 FPS camera, 27.1 FPS detector | **PASS** |
 | **PHASE 2 (Mouse)** | Pointing, Pinch Click, Double-Click, Drag, Scroll, Right-Click | **PASS** |
 | **PHASE 3 (Gestures)** | 14 gestures recognized with orientation-tolerant geometry | **PASS** |
