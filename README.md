@@ -90,23 +90,27 @@ Launch the application:
 python main.py
 ```
 
-The app starts in **GENERAL** mode. Use the **Call Me** gesture (Thumb + Pinky) to cycle through:
+### Simple Workflow
+
+1. **Launch SmartGestureOS** (`python main.py` or Start Menu).
+2. **Place one hand in webcam view** (~30–60 cm away in normal lighting).
+3. **Press Resume** (or press **Ctrl+Alt+G**).
+4. **Lower/remove hand briefly** to re-arm the neutral state.
+5. **Point to move**: Extend your index finger to glide the cursor fluently.
+6. **Pinch to click**: Briefly bring thumb and index tips together to single-click.
+7. **Pinch & hold to drag**: Keep thumb and index pinched to drag items; release to drop.
+8. **Two Fingers to scroll**: Extend index and middle fingers together and move vertically.
+9. **Emergency Pause**: Press **Ctrl+Alt+G** at any moment to pause instantly.
+
+The app starts in **GENERAL** mode. Use the **Call Me** gesture (Thumb + Pinky) or the mode chips to cycle through:
 
 ```
-GENERAL → MEDIA → DRAW → GENERAL
+GENERAL (Mouse & OS) → MEDIA (Volume & Playback) → DRAW (Touchless Canvas)
 ```
 
 Refer to [GESTURES.md](GESTURES.md) for the complete gesture reference.
 
-Start with one clearly lit hand about 30–50 cm from the camera. Point to move
-the cursor and briefly pinch thumb/index to click. Hold Pinch to drag; release
-to drop. **Ctrl+Alt+G** and the fixed Pause/Resume button use the same automation
-state. After resuming, remove your hand briefly to satisfy neutral re-arm.
-Settings, Coach and Trainer pause automation while you configure or practice.
-Camera selection is in Settings and applies after saving and restarting.
-
-To inspect tracking without activating desktop actions, run
-`python main.py --start-paused`.
+To inspect tracking safely without activating desktop actions, use **Settings → Advanced → Open Gesture Test**, or launch with `python main.py --start-paused`.
 
 ### Running in the background
 

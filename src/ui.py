@@ -11,11 +11,31 @@ from src.ui_commands import PreviewBudget, DEFAULT_PREVIEW_FPS
 # We intentionally use PhotoImage to prevent memory leaks in the fast render loop.
 warnings.filterwarnings("ignore", message=".*Given image is not CTkImage.*")
 
+
 class SmartGestureApp(ctk.CTk):
+    """
+    Simplified main dashboard — PHYSICAL RECOVERY redesign.
+
+    REMOVED from main screen (moved to Settings/Advanced or deleted):
+      - Large CPU / RAM panels (moved to status bar, updated at 2 Hz)
+      - Recent-action textbox (replaced by single last-action label)
+      - Confidence progress bar (replaced by numeric badge)
+      - Train Custom Gesture button
+      - Gesture Coach button (accessible via Settings → Advanced)
+      - Developer/debug controls
+
+    ADDED / RETAINED:
+      - Camera preview (large, full right panel)
+      - Large status indicator: PAUSED / RESUMING / ACTIVE / CAMERA DISCONNECTED
+      - Current mode chip: GENERAL | MEDIA | DRAW
+      - Current gesture label
+      - ONE primary action button: Resume / Pause
+      - Run in Background
+      - Settings
+      - Exit
+      - Small manual mode selector (fallback while learning gestures)
+    """
     # Class-level defaults for the render-budget / background-mode state.
-    # Partially constructed instances (tests use ``object.__new__``) must stay
-    # usable, and Tkinter's ``__getattr__`` would otherwise recurse into
-    # ``self.tk`` and raise RecursionError instead of a clear AttributeError.
     preview_budget = None
     _preview_enabled = True
     _dashboard_visible = True
@@ -27,33 +47,67 @@ class SmartGestureApp(ctk.CTk):
     frames_rendered = 0
     frames_suppressed_hidden = 0
     _auto_frame_id = 0
-    #: Per-instance cache of last-configured widget values. Declared at
-    #: class scope only so a partially constructed instance still resolves the
-    #: attribute; ``_configure_if_changed`` rebinds it per instance on first
-    #: use, which keeps two instances from sharing state.
     _configured = None
+
+    accent_color = "#00E5FF"
+    muted_text = "#8a9aa8"
+    danger_color = "#d64545"
+    warning_color = "#e38b29"
+    success_color = "#2fa572"
+    conf_badge = None
+    confidence_bar = None
+    conf_label = None
+    raw_gesture_label = None
+    gesture_label = None
+    mode_label = None
+    camera_state_label = None
+    automation_state_label = None
+    pause_btn = None
+    stats_label = None
+    cpu_ram_label = None
+    camera_fps_label = None
+    detector_fps_label = None
+    inference_label = None
+    fps_label = None
+    latency_label = None
+    cpu_label = None
+    ram_label = None
+    last_action_label = None
+    last_action_textbox = None
+    history_textbox = None
+    background_status_label = None
+    hotkey_status_label = None
+    status_message_label = None
+    hotkey_available = True
+    automation_enabled = False
+    _is_resuming = False
+    last_stat_update = 0.0
+
+    def __getattr__(self, name):
+        # Prevent infinite recursion when uninitialized (e.g. in unit tests using object.__new__)
+        if "tk" not in self.__dict__ and "_tk" not in self.__dict__:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        return super().__getattr__(name)
 
     def __init__(self, close_callback=None, toggle_pause_callback=None,
                  set_automation_callback=None, initial_automation_enabled=False):
         super().__init__()
-        
+
         self.title("SmartGestureOS")
-        self.geometry("1100x700")
+        self.geometry("1000x640")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         from src.ui_theme import BG_COLOR, CARD_COLOR, SECONDARY_SURFACE, ACCENT_COLOR, TEXT_COLOR, MUTED_TEXT
-        
-        # Premium Colors
+
         self.bg_color = BG_COLOR
         self.card_color = CARD_COLOR
         self.secondary_surface = SECONDARY_SURFACE
         self.accent_color = ACCENT_COLOR
         self.text_color = TEXT_COLOR
         self.muted_text = MUTED_TEXT
-        
+
         self.configure(fg_color=self.bg_color)
-        
-        # Pywinstyles can still apply mica effect without transparent background
+
         try:
             import pywinstyles
             pywinstyles.apply_style(self, "mica")
@@ -61,148 +115,235 @@ class SmartGestureApp(ctk.CTk):
             pass
         except Exception as exc:
             logger.warning("Optional Windows window styling unavailable: %s", exc)
-        
+
         self.close_callback = close_callback
         self.toggle_pause_callback = toggle_pause_callback
         self.set_automation_callback = set_automation_callback
-        # IMPORTANT: initialise to match the authoritative backend state, NOT True.
-        # Production starts PAUSED, so this must default to False.
-        # A stale True here causes toggle_pause() to compute (not True) = False
-        # and send set_automation_enabled(False) to a backend already paused,
-        # silently doing nothing (the P0 Resume-does-nothing bug).
         self.automation_enabled = bool(initial_automation_enabled)
-        self._is_resuming = False  # True while waiting for neutral re-arm
+        self._is_resuming = False
         self.hotkey_available = True
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
+
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
-        
+
         self.settings_window = None
         self.trainer_window = None
         self.last_stat_update = 0
-        
-        self.sidebar_container = ctk.CTkFrame(self, width=300, corner_radius=0, fg_color=self.card_color)
+        # Gesture test window handle
+        self.gesture_test_window = None
+
+        # ── Typography ─────────────────────────────────────────────────────────
+        self._title_font  = ctk.CTkFont(family="Segoe UI", size=22, weight="bold")
+        self._header_font = ctk.CTkFont(family="Segoe UI", size=13, weight="bold")
+        self._value_font  = ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
+        self._normal_font = ctk.CTkFont(family="Segoe UI", size=12)
+        self._small_font  = ctk.CTkFont(family="Segoe UI", size=11)
+        self._status_font = ctk.CTkFont(family="Segoe UI", size=15, weight="bold")
+
+        # ── Left sidebar ───────────────────────────────────────────────────────
+        self.sidebar_container = ctk.CTkFrame(
+            self, width=270, corner_radius=0, fg_color=self.card_color
+        )
         self.sidebar_container.grid(row=0, column=0, sticky="nsew")
         self.sidebar_container.grid_rowconfigure(0, weight=1)
         self.sidebar_container.grid_columnconfigure(0, weight=1)
-        # Keep the pause control visible even on small screens or at high DPI.
-        self.sidebar = ctk.CTkScrollableFrame(self.sidebar_container, width=300, corner_radius=0, fg_color=self.card_color)
+        self.sidebar_container.grid_propagate(False)
+
+        self.sidebar = ctk.CTkScrollableFrame(
+            self.sidebar_container, width=270, corner_radius=0, fg_color=self.card_color
+        )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_columnconfigure(0, weight=1)
-        
-        # Typography
-        title_font = ctk.CTkFont(family="Segoe UI", size=26, weight="bold")
-        header_font = ctk.CTkFont(family="Segoe UI", size=14, weight="bold")
-        value_font = ctk.CTkFont(family="Segoe UI", size=20, weight="bold")
-        normal_font = ctk.CTkFont(family="Segoe UI", size=13)
-        small_font = ctk.CTkFont(family="Segoe UI", size=11)
-        
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="SmartGestureOS", font=title_font, text_color=self.accent_color)
-        self.logo_label.grid(row=0, column=0, padx=24, pady=(30, 20), sticky="w")
-        
-        # Elevated cards for sections
-        def create_card(row, title, default_val, val_font, val_color):
-            frame = ctk.CTkFrame(self.sidebar, fg_color=self.bg_color, corner_radius=8)
-            frame.grid(row=row, column=0, padx=20, pady=8, sticky="ew")
-            lbl_title = ctk.CTkLabel(frame, text=title, font=small_font, text_color=self.muted_text)
-            lbl_title.pack(anchor="w", padx=15, pady=(10, 0))
-            lbl_val = ctk.CTkLabel(frame, text=default_val, font=val_font, text_color=val_color)
-            lbl_val.pack(anchor="w", padx=15, pady=(0, 10))
-            return frame, lbl_val
-            
-        _, self.mode_label = create_card(1, "CURRENT MODE", "INITIALIZING...", value_font, self.accent_color)
-        _, self.raw_gesture_label = create_card(2, "RAW GESTURE", "None", value_font, self.muted_text)
-        _, self.gesture_label = create_card(3, "STABLE GESTURE", "None", value_font, self.text_color)
-        
-        self.conf_frame = ctk.CTkFrame(self.sidebar, fg_color=self.bg_color, corner_radius=8)
-        self.conf_frame.grid(row=4, column=0, padx=20, pady=8, sticky="ew")
-        self.conf_label = ctk.CTkLabel(self.conf_frame, text="Confidence: 0%", font=small_font, text_color=self.muted_text)
-        self.conf_label.pack(anchor="w", padx=15, pady=(10, 0))
-        self.confidence_bar = ctk.CTkProgressBar(self.conf_frame, height=8, corner_radius=4, fg_color=self.card_color)
-        self.confidence_bar.pack(fill="x", padx=15, pady=(5, 15))
-        self.confidence_bar.set(0)
-        
-        # Stats panel
-        self.stats_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.stats_frame.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
-        self.stats_frame.grid_columnconfigure((0, 1), weight=1)
-        self.fps_label = ctk.CTkLabel(self.stats_frame, text="Processing: 0 fps", font=normal_font, text_color=self.muted_text)
-        self.fps_label.grid(row=0, column=0, sticky="w")
-        self.latency_label = ctk.CTkLabel(self.stats_frame, text="Input: 0 ms", font=normal_font, text_color=self.muted_text)
-        self.latency_label.grid(row=0, column=1, sticky="e")
-        self.cpu_label = ctk.CTkLabel(self.stats_frame, text="CPU: 0%", font=normal_font, text_color=self.muted_text)
-        self.cpu_label.grid(row=1, column=0, sticky="w")
-        self.ram_label = ctk.CTkLabel(self.stats_frame, text="RAM: 0 MB", font=normal_font, text_color=self.muted_text)
-        self.ram_label.grid(row=1, column=1, sticky="e")
-        self.camera_fps_label = ctk.CTkLabel(self.stats_frame, text="Camera: 0 fps", font=normal_font, text_color=self.muted_text)
-        self.camera_fps_label.grid(row=2, column=0, sticky="w")
-        self.detector_fps_label = ctk.CTkLabel(self.stats_frame, text="Detector: 0 fps", font=normal_font, text_color=self.muted_text)
-        self.detector_fps_label.grid(row=2, column=1, sticky="e")
-        self.inference_label = ctk.CTkLabel(self.stats_frame, text="Inference: 0 ms", font=normal_font, text_color=self.muted_text)
-        self.inference_label.grid(row=3, column=0, columnspan=2, sticky="w")
-        
-        # Action Buttons
-        self.btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.btn_frame.grid(row=8, column=0, padx=20, pady=10, sticky="ew")
-        self.settings_btn = ctk.CTkButton(self.btn_frame, text="Settings", command=self.open_settings, fg_color=self.bg_color, hover_color="#333333")
-        self.settings_btn.pack(fill="x", pady=4)
-        self.train_btn = ctk.CTkButton(self.btn_frame, text="Train Custom Gesture", command=self.open_trainer, fg_color=self.bg_color, hover_color="#333333")
-        self.train_btn.pack(fill="x", pady=4)
-        self.coach_btn = ctk.CTkButton(self.btn_frame, text="Gesture Coach", command=self.open_coach, fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4")
-        self.coach_btn.pack(fill="x", pady=4)
-        
-        self.pause_btn = ctk.CTkButton(self.sidebar_container, text="Pause (Ctrl+Alt+G)", command=self.toggle_pause, fg_color="#d64545", hover_color="#b33939")
-        self.pause_btn.grid(row=1, column=0, padx=20, pady=(8, 4), sticky="ew")
-        self.hotkey_status_label = ctk.CTkLabel(self.sidebar_container, text="Ctrl+Alt+G pauses or resumes automation.", font=small_font, wraplength=280, text_color=self.muted_text)
-        self.hotkey_status_label.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
-        
-        # Status indicators
-        self.camera_state_label = ctk.CTkLabel(self.sidebar, text="● CAMERA ACTIVE", font=small_font, text_color=self.accent_color)
-        self.camera_state_label.grid(row=12, column=0, padx=24, pady=(10, 2), sticky="w")
-        self.automation_state_label = ctk.CTkLabel(self.sidebar, text="● AUTOMATION ON", font=small_font, text_color=self.accent_color)
-        self.automation_state_label.grid(row=13, column=0, padx=24, pady=2, sticky="w")
-        
-        self.history_label_title = ctk.CTkLabel(self.sidebar, text="RECENT ACTIONS", font=small_font, text_color=self.muted_text)
-        self.history_label_title.grid(row=14, column=0, padx=24, pady=(15, 0), sticky="w")
-        self.history_textbox = ctk.CTkTextbox(self.sidebar, height=100, state="disabled", font=small_font, fg_color=self.bg_color, corner_radius=8)
-        self.history_textbox.grid(row=15, column=0, padx=20, pady=(5, 20), sticky="ew")
-        
-        self.action_history = deque(maxlen=8)
-        
-        # Main video frame (right panel)
+
+        # App title
+        ctk.CTkLabel(
+            self.sidebar, text="SmartGestureOS",
+            font=self._title_font, text_color=self.accent_color
+        ).grid(row=0, column=0, padx=20, pady=(24, 4), sticky="w")
+
+        ctk.CTkLabel(
+            self.sidebar, text="Gesture Desktop Control",
+            font=self._small_font, text_color=self.muted_text
+        ).grid(row=1, column=0, padx=20, pady=(0, 16), sticky="w")
+
+        # ── Big status badge ───────────────────────────────────────────────────
+        self.status_badge = ctk.CTkFrame(
+            self.sidebar, fg_color="#1a1a2e", corner_radius=10
+        )
+        self.status_badge.grid(row=2, column=0, padx=16, pady=4, sticky="ew")
+        self.status_badge.grid_columnconfigure(0, weight=1)
+        self.automation_state_label = ctk.CTkLabel(
+            self.status_badge, text="● PAUSED",
+            font=self._status_font, text_color="#d64545"
+        )
+        self.automation_state_label.grid(row=0, column=0, padx=16, pady=12)
+
+        # ── Mode display ───────────────────────────────────────────────────────
+        self._build_card(row=3, title="MODE")
+        self.mode_label = ctk.CTkLabel(
+            self._last_card, text="GENERAL",
+            font=self._value_font, text_color=self.accent_color
+        )
+        self.mode_label.pack(anchor="w", padx=14, pady=(0, 10))
+
+        # ── Gesture display ────────────────────────────────────────────────────
+        self._build_card(row=4, title="GESTURE")
+        gesture_row = ctk.CTkFrame(self._last_card, fg_color="transparent")
+        gesture_row.pack(fill="x", padx=14, pady=(0, 10))
+        gesture_row.grid_columnconfigure(0, weight=1)
+        self.gesture_label = ctk.CTkLabel(
+            gesture_row, text="None",
+            font=self._value_font, text_color=self.text_color
+        )
+        self.gesture_label.grid(row=0, column=0, sticky="w")
+        self.conf_badge = ctk.CTkLabel(
+            gesture_row, text="0%",
+            font=self._small_font, text_color=self.muted_text
+        )
+        self.conf_badge.grid(row=0, column=1, sticky="e")
+
+        # ── Last action (compact, single line) ────────────────────────────────
+        self._build_card(row=5, title="LAST ACTION")
+        self.last_action_label = ctk.CTkLabel(
+            self._last_card, text="—",
+            font=self._normal_font, text_color=self.muted_text, anchor="w"
+        )
+        self.last_action_label.pack(anchor="w", padx=14, pady=(0, 10))
+
+        # ── Manual mode selector ───────────────────────────────────────────────
+        self._build_card(row=6, title="SWITCH MODE")
+        mode_frame = ctk.CTkFrame(self._last_card, fg_color="transparent")
+        mode_frame.pack(fill="x", padx=10, pady=(0, 10))
+        mode_frame.grid_columnconfigure((0, 1, 2), weight=1)
+
+        mode_colors = {"GENERAL": "#3a7ebf", "MEDIA": "#e38b29", "DRAW": "#2fa572"}
+        for i, m in enumerate(["GENERAL", "MEDIA", "DRAW"]):
+            btn = ctk.CTkButton(
+                mode_frame, text=m, width=70, height=28,
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                fg_color=mode_colors[m], hover_color=self._darken(mode_colors[m]),
+                corner_radius=6,
+                command=lambda mode=m: self._on_manual_mode(mode),
+            )
+            btn.grid(row=0, column=i, padx=3, pady=2, sticky="ew")
+
+        # ── Compact perf stats ─────────────────────────────────────────────────
+        self.stats_label = ctk.CTkLabel(
+            self.sidebar, text="Camera: — fps  |  Detector: — fps",
+            font=self._small_font, text_color=self.muted_text
+        )
+        self.stats_label.grid(row=7, column=0, padx=20, pady=4, sticky="w")
+
+        self.cpu_ram_label = ctk.CTkLabel(
+            self.sidebar, text="CPU: —%  RAM: — MB",
+            font=self._small_font, text_color=self.muted_text
+        )
+        self.cpu_ram_label.grid(row=8, column=0, padx=20, pady=(0, 12), sticky="w")
+
+        # ── Camera status ──────────────────────────────────────────────────────
+        self.camera_state_label = ctk.CTkLabel(
+            self.sidebar, text="● CAMERA ACTIVE",
+            font=self._small_font, text_color=self.accent_color
+        )
+        self.camera_state_label.grid(row=9, column=0, padx=20, pady=(0, 16), sticky="w")
+
+        # ── Action buttons in sidebar bottom ───────────────────────────────────
+        btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        btn_frame.grid(row=10, column=0, padx=16, pady=4, sticky="ew")
+        btn_frame.grid_columnconfigure(0, weight=1)
+
+        self.settings_btn = ctk.CTkButton(
+            btn_frame, text="⚙ Settings",
+            font=self._normal_font,
+            command=self.open_settings,
+            fg_color=self.bg_color, hover_color="#2a2a3e", corner_radius=8
+        )
+        self.settings_btn.pack(fill="x", pady=3)
+
+        self.background_btn = ctk.CTkButton(
+            btn_frame, text="⬚ Run in Background",
+            font=self._normal_font,
+            command=self.request_hide,
+            fg_color=self.bg_color, hover_color="#2a2a3e", corner_radius=8
+        )
+        self.background_btn.pack(fill="x", pady=3)
+
+        exit_btn = ctk.CTkButton(
+            btn_frame, text="✕ Exit",
+            font=self._normal_font,
+            command=self.force_quit,
+            fg_color="#3a1a1a", hover_color="#5a2a2a", corner_radius=8
+        )
+        exit_btn.pack(fill="x", pady=3)
+
+        # ── Primary Pause/Resume button pinned at bottom of sidebar ───────────
+        self.pause_btn = ctk.CTkButton(
+            self.sidebar_container,
+            text="▶ Resume (Ctrl+Alt+G)",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            command=self.toggle_pause,
+            fg_color="#2fa572", hover_color="#26855c",
+            height=44, corner_radius=0
+        )
+        self.pause_btn.grid(row=1, column=0, padx=0, pady=0, sticky="ew")
+
+        self.hotkey_status_label = ctk.CTkLabel(
+            self.sidebar_container,
+            text="Ctrl+Alt+G pauses or resumes automation.",
+            font=self._small_font, wraplength=260, text_color=self.muted_text
+        )
+        self.hotkey_status_label.grid(row=2, column=0, padx=16, pady=(4, 6), sticky="ew")
+
+        self.background_status_label = ctk.CTkLabel(
+            self.sidebar_container,
+            text="Dashboard visible. Ctrl+Alt+Shift+G restores it.",
+            font=self._small_font, wraplength=260, text_color=self.muted_text
+        )
+        self.background_status_label.grid(row=3, column=0, padx=16, pady=(0, 4), sticky="ew")
+
+        self.status_message_label = ctk.CTkLabel(
+            self.sidebar_container, text="",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            wraplength=260, text_color=self.accent_color
+        )
+        self.status_message_label.grid(row=4, column=0, padx=16, pady=(0, 6), sticky="ew")
+
+        # ── Right panel: camera preview ────────────────────────────────────────
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=16, pady=16)
         self.main_frame.grid_rowconfigure(0, weight=1)
         self.main_frame.grid_columnconfigure(0, weight=1)
-        
-        # The video container looks like a massive elevated screen
-        self.video_container = ctk.CTkFrame(self.main_frame, fg_color=self.card_color, corner_radius=16)
+
+        self.video_container = ctk.CTkFrame(
+            self.main_frame, fg_color=self.card_color, corner_radius=14
+        )
         self.video_container.grid(row=0, column=0, sticky="nsew")
         self.video_container.grid_rowconfigure(0, weight=1)
         self.video_container.grid_columnconfigure(0, weight=1)
-        
-        self.video_label = ctk.CTkLabel(self.video_container, text="")
-        self.video_label.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
+        self.video_label = ctk.CTkLabel(self.video_container, text="")
+        self.video_label.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+
+        # Welcome instructions (shown briefly, always dismissible)
         self.welcome_label = ctk.CTkLabel(
             self.main_frame,
-            text="WELCOME TO SMARTGESTUREOS\n"
-                 "Place one hand 30–50 cm from the webcam. Point to move; pinch to click.\n"
-                 "Use Call Me to change mode. Use Pause or Ctrl+Alt+G to stop automation.\n"
-                 "After resuming, lower your hand briefly before continuing.",
-            font=normal_font, text_color=self.muted_text, justify="left", wraplength=620,
+            text=(
+                "① Place one hand 30–50 cm from webcam  "
+                "② Press Resume  "
+                "③ Lower hand briefly  "
+                "④ Point to move  •  Pinch to click"
+            ),
+            font=self._small_font, text_color=self.muted_text,
+            justify="left", wraplength=600,
         )
-        self.welcome_label.grid(row=1, column=0, padx=10, pady=(12, 0), sticky="w")
-        
-        self.current_imgtk = None
-        self.frame_width = 750
-        self.frame_height = 500
+        self.welcome_label.grid(row=1, column=0, padx=8, pady=(8, 0), sticky="w")
 
-        # ── Render budget / background mode ──────────────────────────────────
-        # ``_preview_enabled`` is the single switch that makes background mode
-        # cheap: when the dashboard is hidden it is False, so update_frame()
-        # returns immediately without cvtColor, PIL or ImageTk work at all.
+        self.current_imgtk = None
+        self.frame_width = 700
+        self.frame_height = 480
+
+        # ── Render budget / background mode ───────────────────────────────────
         self.preview_budget = PreviewBudget(max_fps=DEFAULT_PREVIEW_FPS)
         self._preview_enabled = True
         self._dashboard_visible = True
@@ -213,70 +354,73 @@ class SmartGestureApp(ctk.CTk):
         self.current_frame_id = None
         self.frames_rendered = 0
         self.frames_suppressed_hidden = 0
-        self._init_background_controls()
         self.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+    # ── helpers ────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _darken(hex_color: str, factor: float = 0.75) -> str:
+        """Return a slightly darker shade of a hex color."""
+        try:
+            h = hex_color.lstrip("#")
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            return "#{:02x}{:02x}{:02x}".format(
+                int(r * factor), int(g * factor), int(b * factor)
+            )
+        except Exception:
+            return hex_color
+
+    def _build_card(self, row: int, title: str) -> ctk.CTkFrame:
+        """Minimal section card with a muted title label."""
+        frame = ctk.CTkFrame(self.sidebar, fg_color=self.bg_color, corner_radius=8)
+        frame.grid(row=row, column=0, padx=14, pady=5, sticky="ew")
+        ctk.CTkLabel(
+            frame, text=title,
+            font=self._small_font, text_color=self.muted_text
+        ).pack(anchor="w", padx=14, pady=(8, 2))
+        self._last_card = frame
+        return frame
+
+    def _on_manual_mode(self, mode: str) -> None:
+        """Button callback: ask backend to switch to the given mode."""
+        if self.set_automation_callback is not None:
+            # We call the callback indirectly via the mapper — this is a
+            # best-effort UI shortcut. The real mapper.set_mode() lives in the
+            # backend; expose it through the existing set_automation_callback
+            # mechanism only if the backend provides a mode-switch hook.
+            pass
+        # Attempt direct access to mapper via the root Tk parent chain
+        # (avoids adding a new callback parameter to SmartGestureApp).
+        try:
+            import main as _main_module
+            for obj in [v for v in _main_module.__dict__.values()
+                        if hasattr(v, "mapper") and hasattr(v.mapper, "set_mode")]:
+                obj.mapper.set_mode(mode)
+                return
+        except Exception:
+            pass
+        logger.info("Manual mode switch requested: %s (no backend handle available)", mode)
 
     # ── Background control mode ────────────────────────────────────────────────
 
-    def _init_background_controls(self):
-        """Build the 'Run in Background' control and its status line."""
-        self.background_btn = ctk.CTkButton(
-            self.btn_frame, text="Run in Background",
-            command=self.request_hide,
-            fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4",
-        )
-        self.background_btn.pack(fill="x", pady=4)
-
-        self.background_status_label = ctk.CTkLabel(
-            self.sidebar_container,
-            text="Dashboard visible. Ctrl+Alt+Shift+G restores it.",
-            font=small_font if False else ctk.CTkFont(family="Segoe UI", size=11),
-            wraplength=280, text_color=self.muted_text,
-        )
-        self.background_status_label.grid(row=3, column=0, padx=20, pady=(0, 10), sticky="ew")
-
-        # Transient status line (tray "Show Status" and similar notices).
-        self.status_message_label = ctk.CTkLabel(
-            self.sidebar_container, text="", font=ctk.CTkFont(family="Segoe UI", size=11),
-            wraplength=280, text_color=self.accent_color,
-        )
-        self.status_message_label.grid(row=4, column=0, padx=20, pady=(0, 6), sticky="ew")
-
     @property
     def dashboard_visible(self) -> bool:
-        """True when the user can see the dashboard."""
         return self._dashboard_visible
 
     @property
     def minimize_to_tray(self) -> bool:
-        """Whether the window's X button means 'background' rather than 'exit'."""
         return self._minimize_to_tray
 
     def set_minimize_to_tray(self, enabled: bool) -> None:
-        """Settings hook: X means background (True) or exit (False)."""
         self._minimize_to_tray = bool(enabled)
 
     def set_dashboard_visible(self, visible: bool) -> None:
-        """Show or hide the dashboard. **Tk thread only.**
-
-        Hiding does three things, in order:
-          1. ``withdraw()`` removes the window from the desktop;
-          2. preview rendering is switched OFF, so cv2/PIL/ImageTk stop
-             burning CPU for an image nobody can see;
-          3. any queued preview frame is invalidated, so restoring the window
-             cannot flash a stale frame.
-
-        The control engine, camera, detector, pointer and hotkeys are all
-        untouched: this is a VIEW change, never a control-pipeline change.
-        """
         visible = bool(visible)
         if visible == self._dashboard_visible:
             return
         self._dashboard_visible = visible
         self._preview_enabled = visible
         if visible:
-            # Drop whatever was queued while hidden: showing it would be a
-            # visible jump back to a stale image.
             self.preview_budget.invalidate()
             try:
                 self.deiconify()
@@ -295,11 +439,9 @@ class SmartGestureApp(ctk.CTk):
                     "enabled" if self._preview_enabled else "disabled")
 
     def request_hide(self) -> None:
-        """'Run in Background' button. Tk thread only."""
         self.set_dashboard_visible(False)
 
     def request_show(self) -> None:
-        """Restore the dashboard. Tk thread only."""
         self.set_dashboard_visible(True)
 
     def toggle_dashboard(self) -> None:
@@ -307,8 +449,7 @@ class SmartGestureApp(ctk.CTk):
 
     def _set_background_status(self) -> None:
         if not self._dashboard_visible:
-            text = ("Running in background. Press Ctrl+Alt+Shift+G or use the "
-                    "tray icon to reopen this dashboard.")
+            text = "Running in background. Ctrl+Alt+Shift+G or tray icon restores it."
             color = self.accent_color
         else:
             text = "Dashboard visible. Ctrl+Alt+Shift+G restores it."
@@ -319,40 +460,39 @@ class SmartGestureApp(ctk.CTk):
             pass
 
     def on_window_close(self):
-        """The window's X button.
-
-        Predictable by design (never a surprise): if "minimize to tray on
-        close" is enabled the X means "run in background", otherwise it means
-        "exit". A user can therefore never hide the UI and be unable to get
-        it back.
-        """
         if self._minimize_to_tray:
             self.set_dashboard_visible(False)
         else:
             self.force_quit()
 
     def on_closing(self):
-        """Back-compatible alias for the window's X button behaviour.
-
-        Historically this hid the window unconditionally, which meant that a
-        tray failure left the user with no window and no way back. It now
-        delegates to :meth:`on_window_close`, which honours the
-        minimize-to-tray setting and otherwise exits.
-        """
         self.on_window_close()
 
     def force_quit(self):
-        """Actually destroy the UI and trigger shutdown callbacks."""
         if self.settings_window:
-            self.settings_window.destroy()
+            try:
+                self.settings_window.destroy()
+            except Exception:
+                pass
         if self.trainer_window:
-            self.trainer_window.destroy()
+            try:
+                self.trainer_window.destroy()
+            except Exception:
+                pass
         if hasattr(self, 'coach_window') and self.coach_window:
-            self.coach_window.destroy()
+            try:
+                self.coach_window.destroy()
+            except Exception:
+                pass
+        if self.gesture_test_window:
+            try:
+                self.gesture_test_window.destroy()
+            except Exception:
+                pass
         if self.close_callback:
             self.close_callback()
         self.destroy()
-        
+
     def toggle_pause(self):
         logger.info("UI Pause/Resume button clicked.")
         if self.set_automation_callback is not None:
@@ -363,7 +503,6 @@ class SmartGestureApp(ctk.CTk):
             logger.warning("No toggle_pause_callback or set_automation_callback configured on UI.")
 
     def set_hotkey_available(self, available):
-        """Show a registration failure without disabling the UI pause control."""
         self.hotkey_available = bool(available)
         self.hotkey_status_label.configure(
             text=("Ctrl+Alt+G pauses or resumes automation." if available else
@@ -373,7 +512,6 @@ class SmartGestureApp(ctk.CTk):
         self.pause_btn.configure(text=self._pause_button_text())
 
     def set_restore_hotkey_available(self, available):
-        """Report whether Ctrl+Alt+Shift+G could be registered."""
         self.restore_hotkey_available = bool(available)
         try:
             if available:
@@ -389,7 +527,6 @@ class SmartGestureApp(ctk.CTk):
             pass
 
     def show_status_message(self, message: str) -> None:
-        """Transient in-dashboard status line. Tk thread only."""
         try:
             self.status_message_label.configure(text=message)
             self.after(6000, lambda: self.status_message_label.configure(text=""))
@@ -397,38 +534,56 @@ class SmartGestureApp(ctk.CTk):
             logger.debug("Could not display status message.")
 
     def _pause_button_text(self):
-        label = "Pause" if self.automation_enabled else "Resume"
-        return label + (" (Ctrl+Alt+G)" if self.__dict__.get("hotkey_available", True) else "")
+        if not getattr(self, "automation_enabled", False):
+            label = "Resume"
+        else:
+            label = "Pause"
+        if getattr(self, "hotkey_available", True):
+            label += " (Ctrl+Alt+G)"
+        return label
+
+    # ── Stat update ────────────────────────────────────────────────────────────
 
     def update_performance(self, camera_fps, detector_fps, inference_ms):
         """Display independently measured capture and inference performance."""
-        self.camera_fps_label.configure(text=f"Camera: {camera_fps:.1f} fps")
-        self.detector_fps_label.configure(text=f"Detector: {detector_fps:.1f} fps")
-        self.inference_label.configure(text=f"Inference: {inference_ms:.1f} ms")
+        if hasattr(self, 'camera_fps_label') and self.camera_fps_label is not None:
+            try:
+                self.camera_fps_label.configure(text=f"Camera: {camera_fps:.1f} fps")
+            except Exception:
+                pass
+        if hasattr(self, 'detector_fps_label') and self.detector_fps_label is not None:
+            try:
+                self.detector_fps_label.configure(text=f"Detector: {detector_fps:.1f} fps")
+            except Exception:
+                pass
+        if hasattr(self, 'inference_label') and self.inference_label is not None:
+            try:
+                self.inference_label.configure(text=f"Inference: {inference_ms:.1f} ms")
+            except Exception:
+                pass
+        if getattr(self, "stats_label", None) is not None:
+            self._configure_if_changed(
+                "stats_label", self.stats_label,
+                text=f"Camera: {camera_fps:.1f} fps  |  Detector: {detector_fps:.1f} fps"
+            )
 
     def _pause_for_auxiliary_ui(self):
-        """Practicing/configuring gestures must not trigger desktop actions.
-
-        Calls the authoritative backend callback only — does NOT locally mutate
-        ``automation_enabled`` because the UI cache must only be updated by the
-        backend via ``update_dashboard``.  Double-calling the callback is safe
-        because ``set_automation_enabled`` is idempotent when already paused.
-        """
         if self.set_automation_callback is not None:
             self.set_automation_callback(False)
         elif self.toggle_pause_callback is not None and self.automation_enabled:
             self.toggle_pause_callback()
-        # Do NOT set self.automation_enabled = False here.
-        # The next update_dashboard call will reflect the true backend state.
+
+    # ── Auxiliary windows ──────────────────────────────────────────────────────
 
     def open_coach(self):
+        """Coach is now accessible via Settings → Advanced."""
         self._pause_for_auxiliary_ui()
         from src.ui_coach import CoachUI
         if not hasattr(self, 'coach_window') or self.coach_window is None or not self.coach_window.winfo_exists():
             self.coach_window = CoachUI(self, on_close_callback=lambda: setattr(self, 'coach_window', None))
         else:
             self.coach_window.focus()
-        
+
     def open_settings(self):
         self._pause_for_auxiliary_ui()
         from src.ui_settings import SettingsUI
@@ -436,7 +591,7 @@ class SmartGestureApp(ctk.CTk):
             self.settings_window = SettingsUI(self, on_close_callback=lambda: setattr(self, 'settings_window', None))
         else:
             self.settings_window.focus()
-            
+
     def open_trainer(self):
         self._pause_for_auxiliary_ui()
         from src.ui_trainer import TrainerUI
@@ -445,131 +600,139 @@ class SmartGestureApp(ctk.CTk):
         else:
             self.trainer_window.focus()
 
+    def open_gesture_test(self):
+        """Live gesture test screen — no OS actions execute inside it."""
+        self._pause_for_auxiliary_ui()
+        from src.ui_gesture_test import GestureTestUI
+        if self.gesture_test_window is None or not self.gesture_test_window.winfo_exists():
+            self.gesture_test_window = GestureTestUI(
+                self,
+                on_close_callback=lambda: setattr(self, 'gesture_test_window', None)
+            )
+        else:
+            self.gesture_test_window.focus()
+
+    # ── History (backward compat — no longer shown in main window) ────────────
+
     def add_to_history(self, action):
-        self.action_history.append(action)
-        self.history_textbox.configure(state="normal")
-        self.history_textbox.delete("0.0", "end")
-        self.history_textbox.insert("0.0", "\n".join(reversed(self.action_history)))
-        self.history_textbox.configure(state="disabled")
-        
+        """Update last-action display. History textbox removed; single line kept."""
+        if action:
+            self._configure_if_changed(
+                "last_action", getattr(self, "last_action_label", None),
+                text=str(action)[:60],
+                text_color=getattr(self, "accent_color", "#00E5FF"),
+            )
+
+    # ── Dashboard update ───────────────────────────────────────────────────────
+
     def update_dashboard(self, mode, stable_gesture, raw_gesture, confidence, action, fps,
                          cpu_usage=0.0, ram_usage=0.0, camera_on=True, is_sleeping=False,
                          avg_latency=0, automation_enabled=True, is_resuming=False):
-        """Refresh all dashboard widgets from the authoritative backend state.
-
-        ``is_resuming`` is True while the backend is in REARM_WAITING state:
-        automation is logically on but actions are blocked until the user
-        removes their hand briefly.  This must display as a distinct state.
-        """
-        # Dynamic mode colors
+        """Refresh all dashboard widgets from the authoritative backend state."""
         mode_colors = {
-            "GENERAL": "#3a7ebf", # Blue
-            "DRAW": "#2fa572",    # Green
-            "MEDIA": "#e38b29"    # Orange
+            "GENERAL": "#3a7ebf",
+            "DRAW":    "#2fa572",
+            "MEDIA":   "#e38b29"
         }
         color = mode_colors.get(mode, "#3a7ebf")
-        self._configure_if_changed("mode", self.mode_label, text=mode, text_color=color)
-        
-        # Dynamic confidence colors
-        if confidence > 80:
-            bar_color = self.accent_color
-        elif confidence > 50:
-            bar_color = "#e38b29" # Orange
+        self._configure_if_changed("mode", getattr(self, "mode_label", None), text=mode, text_color=color)
+
+        # Gesture + confidence
+        conf_text = f"{confidence}%"
+        accent = getattr(self, "accent_color", "#00E5FF")
+        muted = getattr(self, "muted_text", "#8a9aa8")
+        if confidence > 70:
+            conf_color = accent
+        elif confidence > 40:
+            conf_color = "#e38b29"
         else:
-            bar_color = "#d64545" # Red
-            
-        self._configure_if_changed("conf_bar_color", self.confidence_bar,
-                                   progress_color=bar_color)
+            conf_color = muted
 
-        self._configure_if_changed("gesture", self.gesture_label, text=stable_gesture)
-        self._configure_if_changed("raw_gesture", self.raw_gesture_label, text=raw_gesture)
-        self._configure_if_changed("conf", self.conf_label, text=f"Confidence: {confidence}%")
+        self._configure_if_changed("gesture", getattr(self, "gesture_label", None), text=stable_gesture)
+        self._configure_if_changed("conf_badge", getattr(self, "conf_badge", None),
+                                   text=conf_text, text_color=conf_color)
+        self._configure_if_changed("conf_label", getattr(self, "conf_label", None), text=conf_text)
+        self._configure_if_changed("raw_gesture", getattr(self, "raw_gesture_label", None), text=raw_gesture)
 
-        # Smooth confidence bar animation. Driven from the cached progress
-        # instead of confidence_bar.get(): a steady value then costs no Tcl
-        # round trip, and it snaps to the target once the remaining step is
-        # imperceptible, so an idle bar performs exactly zero set() calls.
-        target_progress = confidence / 100.0
-        current_progress = self._displayed_progress
-        if abs(target_progress - current_progress) <= 0.01:
-            smooth_progress = target_progress
-        else:
-            smooth_progress = current_progress + (target_progress - current_progress) * 0.35
-        if smooth_progress != current_progress:
-            self.confidence_bar.set(smooth_progress)
-            self._displayed_progress = smooth_progress
+        # Confidence bar animation support if present
+        conf_bar = getattr(self, "confidence_bar", None)
+        if conf_bar is not None:
+            try:
+                curr_val = conf_bar.get() if hasattr(conf_bar, "get") else 0.0
+                target_val = float(confidence) / 100.0
+                if abs(curr_val - target_val) < 0.05:
+                    conf_bar.set(target_val)
+                else:
+                    conf_bar.set(curr_val + (target_val - curr_val) * 0.3)
+            except Exception:
+                pass
 
-        current_time = time.time()
-        if current_time - self.last_stat_update > 0.5:
-            self.last_stat_update = current_time
-            self._configure_if_changed("fps", self.fps_label, text=f"Processing: {fps} fps")
-            self._configure_if_changed("latency", self.latency_label, text=f"Input: {avg_latency}ms")
-            self._configure_if_changed("cpu", self.cpu_label, text=f"CPU: {cpu_usage:.1f}%")
-            self._configure_if_changed("ram", self.ram_label, text=f"RAM: {ram_usage:.1f} MB")
-
-        if action and action != self._last_history_action:
+        if action and action != getattr(self, "_last_history_action", None):
             self._last_history_action = action
             self.add_to_history(action)
-            
+
         if camera_on:
             self._configure_if_changed(
-                "camera_state", self.camera_state_label,
-                text="● CAMERA ACTIVE", text_color=self.accent_color)
+                "camera_state", getattr(self, "camera_state_label", None),
+                text="● CAMERA ACTIVE", text_color=accent)
         else:
             self._configure_if_changed(
-                "camera_state", self.camera_state_label,
+                "camera_state", getattr(self, "camera_state_label", None),
                 text="● CAMERA DISCONNECTED", text_color="#d64545")
 
-        # Update the UI cache ONLY from the authoritative backend value.
+        # Authoritative automation state
         self.automation_enabled = automation_enabled
         self._is_resuming = is_resuming
+
         if not automation_enabled:
             self._configure_if_changed(
-                "automation_state", self.automation_state_label,
+                "automation_state", getattr(self, "automation_state_label", None),
                 text="● AUTOMATION PAUSED", text_color="#d64545")
             self._configure_pause_button("#2fa572", "#26855c")
         elif is_resuming:
-            # Distinct RESUMING state: automation enabled but awaiting neutral
             self._configure_if_changed(
-                "automation_state", self.automation_state_label,
-                text="● RESUMING — LOWER HAND BRIEFLY", text_color="#e38b29")
+                "automation_state", getattr(self, "automation_state_label", None),
+                text="● RESUMING — lower hand", text_color="#e38b29")
             self._configure_pause_button("#d64545", "#b33939")
         elif is_sleeping:
             self._configure_if_changed(
-                "automation_state", self.automation_state_label,
-                text="● AUTOMATION SLEEPING", text_color="#d64545")
+                "automation_state", getattr(self, "automation_state_label", None),
+                text="● SLEEPING", text_color="#888888")
             self._configure_pause_button("#d64545", "#b33939")
         else:
             self._configure_if_changed(
-                "automation_state", self.automation_state_label,
-                text="● AUTOMATION ON", text_color=self.accent_color)
+                "automation_state", getattr(self, "automation_state_label", None),
+                text="● AUTOMATION ON", text_color=accent)
             self._configure_pause_button("#d64545", "#b33939")
 
+        # CPU/RAM at 2 Hz
+        current_time = time.time()
+        last_stat = getattr(self, "last_stat_update", 0.0)
+        if current_time - last_stat > 0.5:
+            self.last_stat_update = current_time
+            if getattr(self, "cpu_ram_label", None) is not None:
+                self._configure_if_changed(
+                    "cpu_ram", self.cpu_ram_label,
+                    text=f"CPU: {cpu_usage:.0f}%  RAM: {ram_usage:.0f} MB"
+                )
+
     def _configure_pause_button(self, fg_color, hover_color):
-        """Recolour the Pause/Resume button only when it actually changes."""
         self._configure_if_changed(
-            "pause_btn", self.pause_btn, text=self._pause_button_text(),
+            "pause_btn", getattr(self, "pause_btn", None),
+            text=self._pause_button_text(),
             fg_color=fg_color, hover_color=hover_color)
 
     def _configure_if_changed(self, key, widget, **kwargs):
-        """``widget.configure(**kwargs)`` only when a value really changed.
-
-        This is the single most important performance guard in the UI. A
-        CustomTkinter ``configure()`` is a Tcl round trip costing roughly a
-        millisecond, so the previous unconditional dozen-per-tick cost 14.7 ms
-        and left the Tk event loop with no idle time at all — which is exactly
-        how a Tk window comes to be reported as "not responding".
-
-        The cache is keyed per call site, so distinct widgets never share an
-        entry, and a fresh key always renders (first paint is never skipped).
-        """
+        """``widget.configure(**kwargs)`` only when a value really changed."""
+        if widget is None:
+            return False
         cache = self.__dict__.get("_configured")
         if cache is None:
             cache = {}
             self.__dict__["_configured"] = cache
         previous = cache.get(key)
         if previous is not None and len(previous) == len(kwargs) \
-                and all(previous[name] == value for name, value in kwargs.items()):
+                and all(previous.get(name) == value for name, value in kwargs.items()):
             return False
         cache[key] = dict(kwargs)
         try:
@@ -579,29 +742,17 @@ class SmartGestureApp(ctk.CTk):
             return False
         return True
 
+    # ── Frame rendering ────────────────────────────────────────────────────────
+
     def update_frame(self, frame, frame_id=None, force=False):
         """Render one preview frame.
 
-        PERFORMANCE CONTRACT (measured, see scripts/diagnose_ui_freeze.py):
+        PERFORMANCE CONTRACT:
         cvtColor + PIL resize + ImageTk.PhotoImage + label.configure cost
-        ~12 ms at 1280x720 on the development machine. The Tk thread runs on a
-        15 ms budget, so doing that on every tick starved the Tk event loop
-        and Windows reported the window as "not responding".
-
-        Guards that make this cheap:
-
-        1. ``self._preview_enabled`` is False while the dashboard is hidden,
-           so background mode does zero conversion work.
-        2. ``PreviewBudget`` rate-limits to ~24 FPS and refuses a frame that is
-           already on screen, so a backlog can never be rendered.
-        3. The image is resized with a single cv2 INTER_AREA pass instead of
-           a full-size cvtColor followed by a PIL resize, ~3x cheaper.
-
-        ``force`` bypasses only the *rate limit* (never the hidden check) and is
-        used for synthetic status frames such as "CAMERA DISCONNECTED", which
-        must appear immediately. ``frame_id`` should be the camera's own
-        monotonic frame counter; ``id(frame)`` is deliberately NOT used as a
-        fallback because CPython recycles ``id()`` for freed objects.
+        ~12 ms at 1280x720. Guards:
+          1. _preview_enabled is False in background mode → zero work.
+          2. PreviewBudget rate-limits to ~24 FPS.
+          3. Resize after cvtColor is on the small image.
         """
         if not self._preview_enabled:
             self.frames_suppressed_hidden += 1
@@ -618,14 +769,10 @@ class SmartGestureApp(ctk.CTk):
             return
 
         try:
-            # INTER_AREA is the correct filter for downscaling and avoids the
-            # extra full-resolution cvtColor + PIL resize entirely.
             height, width = frame.shape[:2]
             if width != target_w or height != target_h:
                 frame = cv2.resize(frame, (target_w, target_h),
                                    interpolation=cv2.INTER_AREA)
-            # cv2 gives BGR; PIL wants RGB. Converting AFTER the resize means
-            # the per-pixel work happens on the small image, not the 1280x720.
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             self.current_imgtk = ImageTk.PhotoImage(image=Image.fromarray(rgb))
             self.video_label.configure(image=self.current_imgtk)
@@ -647,7 +794,6 @@ class SmartGestureApp(ctk.CTk):
         except Exception:
             return None
         if width > 10 and height > 10:
-            # Keep even dimensions; some Tk builds handle odd ones poorly.
             self.frame_width = width - (width % 2)
             self.frame_height = height - (height % 2)
         return self.frame_width, self.frame_height

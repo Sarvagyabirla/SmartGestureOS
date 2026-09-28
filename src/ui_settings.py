@@ -113,10 +113,12 @@ class SettingsUI(ctk.CTkToplevel):
         self.tab_sensitivity = self.tabview.add("Sensitivity")
         self.tab_camera = self.tabview.add("Camera")
         self.tab_mappings = self.tabview.add("Mappings")
-        
+        self.tab_advanced = self.tabview.add("Advanced")
+
         self.build_sensitivity_tab()
         self.build_camera_tab()
         self.build_mappings_tab()
+        self.build_advanced_tab()
         
         # Save Button
         self.save_btn = ctk.CTkButton(self, text="Save & Close", fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4", command=self.save_and_close)
@@ -175,6 +177,56 @@ class SettingsUI(ctk.CTkToplevel):
                  "Save your settings, then restart SmartGestureOS to use the selected camera.",
             wraplength=460, justify="left",
         ).grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="w")
+
+    def build_advanced_tab(self):
+        self.tab_advanced.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            self.tab_advanced,
+            text="Advanced & Diagnostics",
+            font=self.title_font
+        ).grid(row=0, column=0, padx=10, pady=(15, 5), sticky="w")
+
+        ctk.CTkLabel(
+            self.tab_advanced,
+            text="Use these tools to troubleshoot gesture detection or teach the system new gestures.",
+            text_color=self.muted_text
+        ).grid(row=1, column=0, padx=10, pady=(0, 15), sticky="w")
+
+        # Test, Coach, Trainer buttons
+        self.test_btn = ctk.CTkButton(
+            self.tab_advanced,
+            text="Open Gesture Test (Live Diagnostics)",
+            command=self.open_gesture_test
+        )
+        self.test_btn.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+
+        self.coach_btn = ctk.CTkButton(
+            self.tab_advanced,
+            text="Open Gesture Coach (Practice)",
+            command=self.open_coach
+        )
+        self.coach_btn.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
+
+        self.trainer_btn = ctk.CTkButton(
+            self.tab_advanced,
+            text="Train Custom Gesture",
+            command=self.open_trainer
+        )
+        self.trainer_btn.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
+
+    def open_gesture_test(self):
+        # We call the master (SmartGestureApp) to open the test window
+        if hasattr(self.master, "open_gesture_test"):
+            self.master.open_gesture_test()
+
+    def open_coach(self):
+        if hasattr(self.master, "open_coach"):
+            self.master.open_coach()
+
+    def open_trainer(self):
+        if hasattr(self.master, "open_trainer"):
+            self.master.open_trainer()
 
     def on_profile_change(self, selected_profile):
         if not settings_manager.load_profile(selected_profile):
