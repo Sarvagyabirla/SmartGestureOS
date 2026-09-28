@@ -10,7 +10,7 @@ after the configured hold time (300 ms by default); adjust it in Settings.
 |---|---|---|---|
 | Call Me (thumb and pinky extended) | Cycle to next mode | Cycle to next mode | Cycle to next mode |
 | Pointing (index finger extended) | Move cursor | — | Draw on the in-app canvas |
-| Pinch (thumb and index touch) | Click; pinch twice for double-click; hold to drag | Play or pause | Hover the canvas pointer |
+| Pinch (thumb and index touch) | Click; pinch twice for double-click; hold to drag | Play or pause | — |
 
 ## GENERAL mode
 

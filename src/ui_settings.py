@@ -129,7 +129,7 @@ class SettingsUI(ctk.CTkToplevel):
         
         ctk.CTkLabel(self.tab_sensitivity, text="Mouse Sensitivity:").grid(row=0, column=0, padx=10, pady=15, sticky="w")
         self.sensitivity_slider = ctk.CTkSlider(self.tab_sensitivity, from_=0.1, to=1.0, number_of_steps=90)
-        self.sensitivity_slider.set(settings_manager.settings["gestures"].get("sensitivity", 0.7))
+        self.sensitivity_slider.set(settings_manager.settings["gestures"].get("sensitivity", 0.75))
         self.sensitivity_slider.grid(row=0, column=1, padx=10, pady=15, sticky="ew")
         
         ctk.CTkLabel(self.tab_sensitivity, text="Pointer Smoothing (1 = fast):").grid(row=1, column=0, padx=10, pady=15, sticky="w")
@@ -144,7 +144,7 @@ class SettingsUI(ctk.CTkToplevel):
         
         ctk.CTkLabel(self.tab_sensitivity, text="Action Cooldown (ms):").grid(row=3, column=0, padx=10, pady=15, sticky="w")
         self.cooldown_slider = ctk.CTkSlider(self.tab_sensitivity, from_=100, to=2000, number_of_steps=190)
-        self.cooldown_slider.set(settings_manager.settings["gestures"].get("cooldown_ms", 400))
+        self.cooldown_slider.set(settings_manager.settings["gestures"].get("cooldown_ms", 500))
         self.cooldown_slider.grid(row=3, column=1, padx=10, pady=15, sticky="ew")
         
     def build_mappings_tab(self):

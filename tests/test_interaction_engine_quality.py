@@ -281,3 +281,68 @@ def test_action_specific_hold_times():
     # High-impact and discrete actions maintain 300ms base hold
     assert mapper.get_hold_time("screenshot") == 0.300
     assert mapper.get_hold_time("launch_app:notepad") == 0.300
+
+
+# ---------------------------------------------------------------------------
+# 7. Section 10: Canonical Mappings Consistency Across Config, Docs, and UI
+# ---------------------------------------------------------------------------
+
+def test_canonical_mappings_consistency():
+    repo_root = Path(__file__).resolve().parent.parent
+    defaults_path = repo_root / "config" / "defaults.json"
+    with open(defaults_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    mappings = config.get("mappings", {})
+
+    # 1. GENERAL Mode Mappings
+    general = mappings.get("GENERAL", {})
+    assert general.get("Victory") == "open_vscode"
+    assert general.get("Rock On") == "open_chrome"
+    assert general.get("Four Fingers") == "screenshot"
+    assert general.get("Thumb Up") == "volume_up"
+    assert general.get("Thumb Down") == "volume_down"
+    assert general.get("Open Palm") == "task_view"
+    assert general.get("Closed Fist") == "show_desktop"
+    assert general.get("Crossed Fingers") == "lock_pc"
+    assert general.get("Call Me") == "switch_mode"
+
+    # 2. MEDIA Mode Mappings
+    media = mappings.get("MEDIA", {})
+    assert media.get("Pinch") == "play_pause"
+    assert media.get("Victory") == "next_track"
+    assert media.get("Three Fingers") == "prev_track"
+    assert media.get("Closed Fist") == "mute"
+    assert media.get("Call Me") == "switch_mode"
+
+    # 3. DRAW Mode Mappings
+    draw = mappings.get("DRAW", {})
+    assert draw.get("Victory") == "undo"
+    assert draw.get("Three Fingers") == "redo"
+    assert draw.get("Four Fingers") == "save_drawing"
+    assert draw.get("Thumb Up") == "cycle_color"
+    assert draw.get("Thumb Down") == "toggle_eraser"
+    assert draw.get("Closed Fist") == "clear_canvas"
+    assert draw.get("Call Me") == "switch_mode"
+
+    # 4. GestureMapper registry has all mapped actions
+    mapper = GestureMapper(1280, 720)
+    for mode_map in [general, media, draw]:
+        for gesture, action in mode_map.items():
+            assert action in mapper.action_registry, f"Action {action} not in GestureMapper registry"
+            assert callable(mapper.action_registry[action]["func"]), f"Action {action} func not callable"
+
+    # 5. Coach UI instructions include all 14 canonical gestures
+    from src.ui_coach import GESTURE_INSTRUCTIONS
+    from src.ui_gesture_test import ALL_GESTURES
+    assert len(GESTURE_INSTRUCTIONS) == 14
+    assert len(ALL_GESTURES) == 14
+    for g in ALL_GESTURES:
+        assert g in GESTURE_INSTRUCTIONS, f"Gesture {g} missing from Coach instructions"
+
+    # 6. GESTURES.md and README.md reference the 14 gestures
+    gestures_doc = (repo_root / "GESTURES.md").read_text(encoding="utf-8")
+    readme_doc = (repo_root / "README.md").read_text(encoding="utf-8")
+    for g in ALL_GESTURES:
+        assert g in gestures_doc, f"Gesture {g} not found in GESTURES.md"
+        assert g in readme_doc, f"Gesture {g} not found in README.md"

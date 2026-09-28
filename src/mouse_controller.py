@@ -261,6 +261,7 @@ class MouseController:
             lms_list=lms_list,
             scale_factor=scale_factor,
             confidence=confidence,
+            now=now,
         )
 
     def release_all(self):

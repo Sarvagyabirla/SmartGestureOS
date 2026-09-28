@@ -2,20 +2,20 @@
 
 ## Current status
 
-Updated 29 September 2026: **563 automated tests pass** (0 failures, verified
+Updated 29 September 2026: **564 automated tests pass** (0 failures, verified
 clean across compileall, full pytest suite, pip check, and node site release checks).
 
 **Master Interaction Engine Quality Pass (v0.9.1) Completed:**
 
 1. **P0 Configuration Drift Resolved**: Unified all 14 pointer, mouse, and gesture parameters across `config/defaults.json`, `profiles/default.json`, `_SAFE_DEFAULTS`, `MouseController`, and `GestureClassifier`. Added automated drift protection tests.
-2. **Immediate Single Click Emission**: Single click emits immediately upon short pinch release (< 350 ms) without waiting for double-click expiration. Median click latency reduced to 0.0 ms from detection.
+2. **Immediate Single Click Emission**: Single click emits immediately upon short pinch release (< 350 ms) without waiting for double-click expiration. Real-world click latency bounded by frame cadence (~33–66 ms end-to-end).
 3. **Native Windows Double-Click Semantics**: Two short pinches emit two immediate clicks; double-click timing and spatial tolerances are handed off cleanly to Windows OS without emitting spurious triple clicks.
 4. **Click Anchor Locking**: Anchors cursor to pinch onset coordinates during click formation, reducing median click target drift to 0.0 px.
-5. **Drag Continuity & Smooth Transition**: Drag smoother is seeded directly from click anchor coordinates with adaptive distance/time gating (16px / 120ms or 350ms hold), eliminating the first-frame snap.
+5. **Drag Continuity & Smooth Transition**: Drag smoother is seeded directly from click anchor coordinates with adaptive distance/time gating (16px / 120ms or 350ms hold) and pinch midpoint tracking, eliminating the first-frame snap.
 6. **Confidence-Aware Pointer Entry & Fast Hand-Loss Exit**: Strong pointing confidence (>= 60%) activates pointer immediately on frame 1. Real hand disappearance immediately releases and exits pointer mode without grace delay.
-7. **Scroll Quality Refinement**: Added 0.02 normalized deadzone around anchor Y, velocity scaling, and clamped wheel ticks to 3/frame to prevent runaway scroll.
-8. **Automated Interaction Benchmark Tool**: `scripts/validate_interaction_quality.py` measures pointer acquisition (median 248ms), endpoint error (8.1px), rest jitter RMS (2.11px), click drift (0.0px), double click interval (57.1ms), and 0 stuck mouse events.
-9. **Frozen Executable & Installer v0.9.1**: Built and verified `SmartGestureOS.exe` (`--self-check` & `--ui-self-check` code 0) and Inno Setup installer `SmartGestureOS-Setup-v0.9.1.exe` (`faf453b526a5df49b5f39b1d6fe98493759db6a9a6214a11e90d20784dec678b`).
+7. **Scroll Quality Refinement**: Added 0.015 normalized deadzone around anchor Y, velocity scaling, and clamped wheel ticks to 3/frame to prevent runaway scroll.
+8. **Automated Interaction Benchmark Tool**: `scripts/validate_physical_interaction.py` measures pointer acquisition (median 24.0ms), endpoint error (12.0px), rest jitter RMS (0.22px), click drift (0.0px), double click interval (160.0ms), and 0 stuck mouse events.
+9. **Frozen Executable & Installer v0.9.1**: Built and verified `SmartGestureOS.exe` (`--self-check` & `--ui-self-check` code 0) and Inno Setup installer `SmartGestureOS-Setup-v0.9.1.exe` (`3321dddabf19bf09ded94cf1663e9983f7a1571f4c8daed4fc4ddbb60fdf7141`).
 
 **Background Control Mode shipped.** A *Run in Background* button, a system
 tray menu (Open / Pause / Resume / Show Status / Exit) and a

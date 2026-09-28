@@ -35,7 +35,7 @@ the observed native uploader activity, and the limits of local validation.
 - **Three control modes** — GENERAL (mouse + OS), MEDIA, and DRAW
 - **Real-time hand tracking** via MediaPipe Hand Landmarker (21 3D landmarks)
 - **Animated RGB hand highlight** so a detected hand is easy to see in the camera view
-- **14 built-in static gestures** — Pointing, Pinch, Victory, Rock On, Open Palm, Closed Fist, Thumb Up/Down, Two Fingers, Three Fingers, Four Fingers, Middle Finger, Call Me, and Crossed Fingers. Pinch hold/double-click are temporal actions.
+- **14 built-in static gestures** — Pointing, Pinch, Victory, Rock On, Open Palm, Closed Fist, Thumb Up, Thumb Down, Two Fingers, Three Fingers, Four Fingers, Middle Finger, Call Me, and Crossed Fingers. Pinch hold/double-click are temporal actions.
 - **Temporal event engine** — single/double click, drag, and scroll are temporal events, not static poses
 - **Custom gesture training** — record and match your own gestures (nearest-sample matching)
 - **Automatic camera recovery** — reconnects if webcam is unplugged

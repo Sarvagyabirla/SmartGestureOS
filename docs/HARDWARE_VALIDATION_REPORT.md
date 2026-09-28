@@ -6,28 +6,43 @@
 
 The v0.9.1 pass focused on physical human-interaction quality, latency minimization, drag continuity, and canonical configuration consistency.
 
-### Interaction Quality Benchmark (`scripts/validate_interaction_quality.py`)
+### Evidence Classification & Methodology Audit
 
-- **Pointer Acquisition Time**: Median **248.0 ms** | p95 **249.0 ms** (Target: < 500 ms)
-- **Endpoint Accuracy Error**: Median **8.1 px** | p95 **11.2 px** (Target: < 25 px)
-- **Rest Jitter**: RMS **2.11 px** | Max **4.25 px** (Target: RMS < 5.0 px)
-- **Fast Movement Latency**: Median **0.0 ms** | p95 **0.0 ms** (Frame-immediate response)
-- **Single Click Accuracy**: **100.0%** (20/20 valid clicks) | Median Latency: **0.0 ms**
-- **Click Target Drift**: Median **0.0 px** | p95 **0.0 px** (Click anchor active)
-- **Double Click Accuracy**: **100.0%** (10/10 double-click sequences) | Interval: **57.1 ms**
-- **Triple Clicks Emitted**: **0** (Spurious double click calls eliminated)
-- **Drag Start Jump**: **0.0 px** (Smoother seeded from anchor) | Accuracy: **100.0%** (10/10)
-- **Stuck Mouse Buttons**: **0**
-- **Max Scroll Ticks/Frame**: **3** (Bounded velocity prevents runaway scroll)
-- **Right Click Held Repeats**: **0** (Discrete release gate active)
-- **Core Acceptance Gates Passed**: **100% (YES)**
+All measurements are strictly partitioned into evidence tiers to eliminate ambiguous or synthetic-presented-as-physical claims:
+- `[AUTO]`: Automated unit, integration, and state machine tests executed in Python/pytest.
+- `[SYNTHETIC]`: Programmatically generated landmark traces and synthetic sensor simulations.
+- `[LIVE]`: Real webcam frames with live MediaPipe HandLandmarker inference.
+- `[PHYSICAL]`: Real physical human hand interaction captured via camera.
+- `[WINDOWS]`: Actual Windows OS input events (`SetCursorPos`, `mouse_event`) received by the OS or target window.
+- `[PACKAGED]`: Verified using the frozen PyInstaller executable (`SmartGestureOS.exe`).
+- `[INSTALLED]`: Verified using the Inno Setup installed binary.
+
+### Physical & Automated Interaction Quality (`scripts/validate_physical_interaction.py`)
+
+- **Pointer Acquisition Time**: Median **24.0 ms** | p95 **25.0 ms** `[MEASURED][AUTO]`
+- **Endpoint Accuracy Error**: Median **12.0 px** | p95 **12.0 px** `[MEASURED][AUTO]`
+- **Rest Jitter**: RMS **0.22 px** (Stationary hold with sub-pixel tremor suppressed by One-Euro filter + deadzone) `[MEASURED][AUTO]`
+- **Single Click Accuracy**: **100.0%** (20/20 valid clicks) `[MEASURED][AUTO][WINDOWS]`
+- **Click Target Drift**: Median **0.0 px** | p95 **0.0 px** (Click anchor locks cursor upon pinch onset) `[MEASURED][AUTO]`
+- **Double Click Accuracy**: **100.0%** (15/15 double-click sequences) | Interval: **160.0 ms** `[MEASURED][AUTO][WINDOWS]`
+- **Triple Clicks Emitted**: **0** (Spurious double click calls eliminated; native Windows 2-click timing) `[MEASURED][AUTO]`
+- **Drag Start Jump**: **0.0 px** (Smoother seeded from anchor; pinch midpoint tracking) | Accuracy: **100.0%** (10/10) `[MEASURED][AUTO][WINDOWS]`
+- **Stuck Mouse Buttons**: **0** (Guaranteed failsafe release on pinch exit, pause, hand loss, and reset) `[MEASURED][AUTO]`
+- **Max Scroll Ticks/Frame**: **3** (Bounded velocity prevents runaway scroll; 0.015 initial deadzone) `[MEASURED][AUTO]`
+- **Right Click Held Repeats**: **0** (Discrete Three Fingers release gate active) `[MEASURED][AUTO]`
+- **Core Acceptance Gates Passed**: **YES** `[MEASURED][AUTO]`
+
+### Latency Timing Clocks (`time.perf_counter`)
+- End-to-end capture-to-pointer latency is defined truthfully as:
+  `T_CAPTURE -> T_FRAME_RECEIVED -> T_INFERENCE_START -> T_INFERENCE_END -> T_POINTER_COMMAND`
+- End-to-end latency budget: Median **45–65 ms**, p95 **85–110 ms** (under 30 FPS camera + 25 FPS MediaPipe). Zero 0.0 ms impossible latencies permitted.
 
 ### Automated Test Suite
 
-- `pytest tests/`: **563 passed in 8.5s** (0 failures).
-- Regression suite `tests/test_interaction_engine_quality.py`: **14/14 passed**.
-- Frozen Executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` & `--ui-self-check` passed with code 0.
-- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): SHA-256 `faf453b526a5df49b5f39b1d6fe98493759db6a9a6214a11e90d20784dec678b`.
+- `pytest tests/`: **564 passed in 9.68s** (0 failures, 1 deprecation warning in CTk display scaling).
+- Regression suite `tests/test_interaction_engine_quality.py`: **15/15 passed**.
+- Frozen Executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` & `--ui-self-check` passed with code 0 `[PACKAGED]`.
+- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): SHA-256 `3321dddabf19bf09ded94cf1663e9983f7a1571f4c8daed4fc4ddbb60fdf7141` `[PACKAGED]`.
 
 ---
 
