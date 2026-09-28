@@ -29,28 +29,32 @@ from .pointer_path import PointerIntent, PointerMetrics
 _DEFAULT_SENSITIVITY = 0.85
 _DEFAULT_SMOOTHING = 1
 
-# Pointer tuning, derived from the measured ~30 FPS detector cadence.
+# Pointer tuning, derived from the MEASURED detector cadence on the
+# development machine (scripts/diagnose_runtime.py): camera ~14.7 FPS,
+# detector ~14.5 FPS, i.e. a ~68 ms sample interval, NOT the 30 ms the older
+# comments assumed.
 #
-# At a 30 Hz sample interval the One Euro smoothing factor is
+# At a sample interval dt the One Euro smoothing factor is
 #     a = 2*pi*cutoff*dt / (1 + 2*pi*cutoff*dt)
 # and the group delay of the resulting first-order low pass is ~1/(2*pi*cutoff):
 #
-#   cutoff  0.55 Hz -> a = 0.10 -> 0.29 s delay  (deliberate, "smooth" end)
-#   cutoff  1.92 Hz -> a = 0.29 -> 0.08 s delay  (default smoothing = 2)
-#   cutoff 12.0  Hz -> a = 0.71 -> 0.013 s delay  (feels immediate)
+#   cutoff  6.0 Hz -> delay  26 ms  (feels immediate)
+#   cutoff  4.0 Hz -> delay  40 ms  (default smoothing = 2)
+#   cutoff  2.0 Hz -> delay  80 ms  (heavy but usable)
+#   cutoff  0.55 Hz -> delay 290 ms (UNUSABLE - the cursor trails the hand)
+#
+# The previous range was 2.0 Hz down to 0.55 Hz. The 0.55 Hz end imposed a
+# ~260-290 ms group delay, which is exactly the "the cursor is not where my
+# hand is" complaint: the One Euro filter's own group delay, not jitter. The
+# whole slider now lives between 6.0 Hz and 2.0 Hz, so even the smoothest
+# setting adds at most ~80 ms and the default adds ~40 ms.
 #
 # ``beta`` couples cutoff to fingertip speed in SCREEN PIXELS PER SECOND, so a
-# single coefficient spans the useful range: with beta = 0.079 the cutoff
-# crosses 12 Hz at ~125 px/s, which means anything faster than a slow drift is
-# effectively unfiltered (fast motion gets less smoothing) while a nearly
-# still hand sits at the low cutoff (jitter gets heavy suppression).
-#
-# The previous production values were min_cutoff 3.85 Hz / beta 0.35. That
-# cutoff was high enough to pass jitter straight through, while the beta was
-# far too small to raise it during motion — so the cursor was laggy and
-# jittery at the same time.
-_CUTOFF_RESPONSIVE = 2.0
-_CUTOFF_SMOOTHEST = 0.55
+# single coefficient spans the useful range: with beta ~0.09 the cutoff rises
+# with motion, meaning a fast-moving hand is effectively unfiltered while a
+# nearly-still hand sits at the low cutoff and gets the jitter suppression.
+_CUTOFF_RESPONSIVE = 6.0
+_CUTOFF_SMOOTHEST = 2.0
 _BETA_BASE = 0.015
 _BETA_SPAN = 0.075
 
@@ -83,8 +87,12 @@ class MouseController:
         """Map the UI slider (1 = responsive, 20 = smooth) to One Euro cutoff.
 
         The slider still reads as "1 = responsive, 20 = smooth" for users, but
-        the whole range now sits in the responsive band instead of 4.0-1.2 Hz,
-        which imposed a >= 40 ms group delay on every single update.
+        the whole range is deliberately confined to a USABLE band. The old
+        range reached 0.55 Hz, whose ~1/(2*pi*cutoff) group delay is ~290 ms:
+        the cursor visibly trailed the hand and users read that as "the app is
+        frozen" rather than "the filter is smooth". The band is now 6.0 Hz
+        (26 ms) down to 2.0 Hz (80 ms), so the worst case is still responsive
+        and the default (~4 Hz, 40 ms) feels immediate.
         """
         smoothing = max(1, min(20, int(smoothing)))
         span = _CUTOFF_RESPONSIVE - _CUTOFF_SMOOTHEST

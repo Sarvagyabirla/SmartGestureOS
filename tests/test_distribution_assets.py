@@ -45,3 +45,44 @@ def test_desktop_icon_has_all_shipping_sizes():
         for size in (16, 24, 32, 48, 64, 128, 256):
             assert (size, size) in image.ico.sizes()
             assert image.ico.getimage((size, size)).getbbox() is not None
+
+
+# -- Background Control Mode must survive packaging --------------------------
+#
+# A tray-less "Run in Background" is a trap: the dashboard disappears and the
+# user has no visible way back. pystray is imported at runtime, so PyInstaller
+# cannot see it, and it is a pure runtime dependency - both facts have to be
+# asserted, not assumed.
+
+def test_pystray_is_a_declared_runtime_requirement():
+    """requirements.txt must pin pystray, or the frozen EXE has no tray."""
+    requirements = (ROOT / 'requirements.txt').read_text(encoding='utf-8')
+    pinned = [line.split('==')[0].strip().lower()
+              for line in requirements.splitlines()
+              if line.strip() and not line.strip().startswith('#')
+              and '==' in line]
+    assert 'pystray' in pinned, (
+        "pystray is imported at runtime in main.py; without it in "
+        "requirements.txt the frozen EXE silently loses its tray icon")
+
+
+def test_spec_bundles_pystray_for_background_mode():
+    spec = (ROOT / 'packaging' / 'windows' / 'SmartGesture.spec').read_text(encoding='utf-8')
+    assert "'pystray'" in spec, (
+        "pystray imports its Win32 backend dynamically, so PyInstaller's "
+        "static analysis cannot find it; it needs an explicit hidden import")
+
+
+def test_tray_icon_is_reachable_from_both_source_and_frozen_layouts():
+    """_tray_icon_path must search both the repo and the PyInstaller bundle."""
+    import main as main_module
+    path = main_module.MainApp._tray_icon_path()
+    assert path, 'tray icon could not be located in the source layout'
+    assert Path(path).is_file()
+    assert path.lower().endswith('.ico')
+
+
+def test_dashboard_restore_hotkey_is_distinct_from_pause_hotkey():
+    import main as main_module
+    assert main_module.RESTORE_HOTKEY == 'ctrl+alt+shift+g'
+    assert 'ctrl+alt+g' not in main_module.RESTORE_HOTKEY

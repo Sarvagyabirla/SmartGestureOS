@@ -5,10 +5,21 @@ Central temporal reset: GestureMapper.reset_temporal_state()
 resets timer, sleep_timer, and all continuous-action state.
 
 Execute-action feedback follows result: speak only on success.
+
+ActionExecutor integration (Stage 4):
+    Slow discrete actions (screenshot, app launches, OS shortcuts) are routed
+    through ActionExecutor so they run off the inference thread. This prevents
+    ImageGrab.grab(), subprocess.Popen() and keyboard.send() from blocking the
+    processing loop, which would cause the tracking watchdog to invalidate live
+    tracking and the cursor to visibly freeze after every such action.
+
+    Continuous actions (cursor, draw, scroll, drag) always run inline — they
+    must not be delayed by a worker queue.
 """
 import time
 import threading
 from config import SETTINGS
+from .action_executor import ActionExecutor
 from .mouse_controller import MouseController
 from .keyboard_controller import KeyboardController
 from .media_controller import MediaController
@@ -21,6 +32,21 @@ from .feedback_controller import FeedbackController
 from .drawing import DrawingCanvas
 from .utils import get_distance
 from .logger import logger
+
+# Actions that are slow enough to block the inference thread if run inline.
+# Must NOT include cursor, scroll, drag, draw — those require immediate response.
+_ASYNC_ACTIONS = frozenset({
+    "screenshot",
+    "open_vscode",
+    "open_chrome",
+    "open_calculator",
+    "open_explorer",
+    "open_notepad",
+    "lock_pc",
+    "task_view",
+    "show_desktop",
+    "save_drawing",
+})
 
 
 class GestureHoldTimer:
@@ -120,6 +146,12 @@ class GestureMapper:
         self.is_sleeping: bool = False
         self._mode_switch_gesture: str | None = None
 
+        # Async worker for slow discrete actions (Stage 4).
+        # Started here; stopped in cleanup(). Generation is bumped by cancel()
+        # so queued actions are silently discarded after pause/mode-switch/shutdown.
+        self._action_executor = ActionExecutor(on_result=self._on_async_action_result)
+        self._action_executor.start()
+
         self.action_registry = {
             "open_vscode":      {"func": self.shortcut.open_vscode,      "repeatable": False},
             "open_chrome":      {"func": self.shortcut.open_chrome,      "repeatable": False},
@@ -184,19 +216,62 @@ class GestureMapper:
 
     # ── Actions ────────────────────────────────────────────────────────────────
 
+    def _on_async_action_result(self, name: str, result, elapsed: float) -> None:
+        """Worker callback for slow actions — runs on the action-executor thread.
+
+        Only log; do NOT touch Tk, the mouse, or any lock-protected state here.
+        TTS feedback is intentionally deferred to the worker thread because it
+        is itself slow (pyttsx3 calls COM) and must not block the inference path.
+        """
+        if result is None:
+            return
+        if hasattr(result, "success"):
+            if result.success:
+                self.feedback.speak(name.replace("_", " "))
+                logger.info("Async action '%s' completed in %.0f ms.", name, elapsed * 1000)
+            else:
+                msg = getattr(result, "message", "") or ""
+                err = getattr(result, "error", "") or ""
+                logger.warning(
+                    "Async action '%s' failed: %s%s", name, msg,
+                    f" ({err})" if err else "",
+                )
+        else:
+            self.feedback.speak(name.replace("_", " "))
+            logger.info("Async action '%s' completed in %.0f ms.", name, elapsed * 1000)
+
     def execute_action(self, action_name: str) -> str | None:
         """
         Execute a registered action.  Feedback (TTS) fires only on success (§23).
+
+        Slow discrete actions are routed through ActionExecutor (off-thread).
+        Fast/continuous actions (cursor, scroll, draw, media keys) run inline.
         Returns a user-visible result string or None.
         """
         if action_name not in self.action_registry:
             return None
 
-        try:
-            # Safety: release mouse before lock to prevent stuck buttons
-            if action_name == "lock_pc":
-                self.mouse.release_all()
+        # Safety: release mouse before a lock-screen action to avoid stuck button.
+        if action_name == "lock_pc":
+            self.mouse.release_all()
 
+        if action_name in _ASYNC_ACTIONS:
+            # Route slow actions off the inference thread.  The executor stamps
+            # the current generation; a cancel() (pause/mode-switch/shutdown)
+            # before the worker picks it up silently discards the job.
+            func = self.action_registry[action_name]["func"]
+            submitted = self._action_executor.submit(
+                action_name, func,
+                is_valid=lambda: not self._action_executor.stopping,
+            )
+            if submitted:
+                logger.debug("Queued async action: %s", action_name)
+                return f"Queued: {action_name}"
+            logger.warning("Async action '%s' could not be queued (executor stopping).", action_name)
+            return None
+
+        # Inline path for fast/media/draw/volume actions.
+        try:
             res = self.action_registry[action_name]["func"]()
 
             # ActionResult: check before speaking
@@ -224,6 +299,10 @@ class GestureMapper:
         if mode in self.modes:
             self.mouse.release_all()
             self.reset_temporal_state()
+            # Cancel any queued slow action for the old mode so it cannot fire
+            # after the mode has changed (e.g. a queued screenshot after switching
+            # to DRAW).
+            self._action_executor.cancel(f"mode switch to {mode}")
             self.mode = mode
             logger.info(f"Switched Mode: {self.mode}")
 
@@ -378,5 +457,9 @@ class GestureMapper:
     def cleanup(self) -> None:
         if hasattr(self, "mouse"):
             self.mouse.release_all()
+        if hasattr(self, "_action_executor"):
+            # stop() refuses new work, drains the queue and joins the worker.
+            # This guarantees no slow action fires after shutdown.
+            self._action_executor.stop(timeout=2.0)
         if hasattr(self, "feedback"):
             self.feedback.stop()

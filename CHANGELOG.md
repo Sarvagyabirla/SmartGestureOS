@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### UI freeze root-cause repair and Background Control Mode — 28 September 2026
+
+Root-cause analysis, with before/after measurements, is in
+[`docs/UI_FREEZE_ROOT_CAUSE.md`](docs/UI_FREEZE_ROOT_CAUSE.md).
+
+**Fixed — the window froze because the Tk event loop was 180 % over budget.**
+`update_ui_loop()` runs on a 15 ms budget but measured 26.7 ms of work per
+tick (`update_dashboard` 14.65 ms + `update_frame` 12.06 ms), so the Tcl/Tk
+pump never idled and Windows marked the window "Not Responding". The
+dashboard is now change-detected (zero `configure()` calls for a steady
+gesture), the frame is downscaled with `cv2.INTER_AREA` before colour
+conversion, preview is rate-limited to 24 FPS and label geometry is cached.
+Measured Tk event-loop delay p95: **16.13 ms → 1.08 ms**.
+
+**Fixed — the window could disappear with no way back.** `on_closing()`
+unconditionally called `withdraw()`, so a tray failure left the user with no
+window, no tray and no hotkey while the process kept holding the camera and
+the global keyboard hook. The X button now honours an explicit
+minimize-to-tray setting, and the dashboard can always be restored.
+
+**Fixed — the pointer filter added ~290 ms of group delay.** The smoothing
+slider mapped onto 2.0–0.55 Hz, and 0.55 Hz has a ~1/(2π·0.55) ≈ 290 ms
+One Euro delay. The band is now 6.0–2.0 Hz (26–80 ms), and a test fails the
+build if any slider position exceeds 100 ms.
+
+**Added — Background Control Mode.** A *Run in Background* button, a system
+tray menu (Open / Pause / Resume / Show Status / Exit) and the
+**Ctrl+Alt+Shift+G** restore hotkey. Background mode is a view-only change:
+camera, MediaPipe, classifier, pointer and event engine are untouched, while
+preview rendering, canvas compositing and landmark drawing stop. Measured
+**22 % lower CPU** and **0 preview renders** versus the visible dashboard.
+
+**Fixed — Tk thread-safety.** Tray and hotkey callbacks previously called
+`ui.after()` from the pystray and `keyboard` listener threads. All worker
+threads now post to the new `UiCommandQueue`, drained only by the Tk thread.
+
+**Fixed — packaging.** `pystray` was installed in the venv but missing from
+`requirements.txt` and the PyInstaller spec, so a frozen build would have
+shipped with no tray. It is now a pinned requirement with explicit hidden
+imports, and the tray icon resolves in both source and frozen layouts. Both
+hotkeys are now unregistered on exit.
+
+**Added — diagnostics.** `scripts/diagnose_ui_freeze.py` (Tk cost breakdown,
+no camera needed) and `scripts/diagnose_runtime.py` (full live pipeline,
+visible vs background). Both report measured percentiles, never targets.
+
+**Added — 48 regression tests** in `tests/test_background_mode.py` and
+`tests/test_distribution_assets.py`.
+
 ### Product specification implementation — 27 September 2026
 
 - Preserve the complete user specification and map every subsystem to the

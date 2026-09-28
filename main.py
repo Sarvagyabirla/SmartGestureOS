@@ -5,13 +5,28 @@ import queue
 import psutil
 import os
 import collections
+from pathlib import Path
 from config import SETTINGS
 from src.camera import Camera
 from src.gesture_detector import GestureDetector
 from src.gesture_classifier import GestureClassifier
 from src.gesture_mapper import GestureMapper
 from src.ui import SmartGestureApp
+from src.ui_commands import UiCommandQueue
 from src.logger import logger
+
+#: Restore the hidden dashboard. Deliberately NOT Ctrl+Alt+G: that hotkey is
+#: reserved for emergency Pause/Resume and must stay reachable when no window
+#: is visible. Ctrl+Alt+Shift+G is an unused Windows combination and gives
+#: the user a way back into the UI even if the tray icon is unavailable.
+RESTORE_HOTKEY = "ctrl+alt+shift+g"
+
+try:
+    import pystray
+    from PIL import Image
+    _HAS_PYSTRAY = True
+except ImportError:
+    _HAS_PYSTRAY = False
 
 
 class MainApp:
@@ -63,6 +78,8 @@ class MainApp:
         self.frame_queue: queue.Queue = queue.Queue(maxsize=1)
         self.process_thread: threading.Thread | None = None
         self.stats_thread: threading.Thread | None = None
+        self.tray_thread: threading.Thread | None = None
+        self.tray_icon = None
 
         self.cpu_usage: float = 0.0
         self.ram_usage: float = 0.0
@@ -83,8 +100,16 @@ class MainApp:
         self._shutdown_started: bool = False
         self._shutdown_lock: threading.Lock = threading.Lock()
 
-        # Global hotkey (§5) — store handle for cleanup
+        # Global hotkey (§5) — store handles for cleanup.
+        # Two independent hotkeys, never overloaded:
+        #   Ctrl+Alt+G        -> Pause / Resume automation (emergency stop)
+        #   Ctrl+Alt+Shift+G  -> show the hidden dashboard
+        # Both must work while the dashboard is hidden, which is why they are
+        # registered globally with the `keyboard` library rather than bound to
+        # a Tk widget.
         self._hotkey_handle = None
+        self._restore_hotkey_handle = None
+        self.ui_commands = UiCommandQueue()
         try:
             import keyboard
             self._hotkey_handle = keyboard.add_hotkey(
@@ -101,7 +126,19 @@ class MainApp:
                 "Global shortcut unavailable; UI pause button still works."
             )
 
+        try:
+            import keyboard
+            self._restore_hotkey_handle = keyboard.add_hotkey(
+                RESTORE_HOTKEY, self._hotkey_restore_dashboard
+            )
+            logger.info(f"{RESTORE_HOTKEY.upper()} dashboard-restore hotkey registered.")
+        except Exception as e:
+            # Not fatal: the tray icon and the taskbar button remain available.
+            logger.warning(f"Failed to bind {RESTORE_HOTKEY}: {e} — "
+                           "use the tray icon or taskbar to restore the dashboard.")
+
         self.ui.set_hotkey_available(self._hotkey_handle is not None)
+        self.ui.set_restore_hotkey_available(self._restore_hotkey_handle is not None)
 
         if start_paused:
             self._invalidate_tracking()
@@ -134,6 +171,11 @@ class MainApp:
             self.mapper.mouse.release_all()
             self.mapper.reset_temporal_state()
             self.classifier.reset()
+            # Cancel any queued slow action so it cannot fire after a pause or
+            # mode-switch. The generation bump above already guards against stale
+            # inference results; this is the corresponding guard for actions.
+            if hasattr(self.mapper, "_action_executor"):
+                self.mapper._action_executor.cancel("tracking invalidated")
 
     def _expire_tracking(self) -> bool:
         """UI-thread watchdog also releases input while native inference stalls."""
@@ -229,7 +271,152 @@ class MainApp:
         )
         self.stats_thread.start()
 
+        if _HAS_PYSTRAY:
+            self.tray_thread = threading.Thread(
+                target=self._run_tray, daemon=True, name="tray"
+            )
+            self.tray_thread.start()
+
         self.update_ui_loop()
+
+    # ── Background Tray ───────────────────────────────────────────────────────
+
+    def _run_tray(self) -> None:
+        """System tray icon. Runs on its own thread; never touches Tk itself.
+
+        pystray invokes menu callbacks on the tray thread. Calling
+        ``deiconify()`` or ``configure()`` from there is exactly the Tk
+        thread-safety violation that produces a stuck window, so every
+        callback only *posts* to :attr:`ui_commands`; the Tk thread drains
+        that queue in ``update_ui_loop``.
+        """
+        try:
+            icon_path = self._tray_icon_path()
+            image = Image.open(icon_path) if icon_path else Image.new(
+                "RGB", (64, 64), color=(0, 128, 255))
+
+            def on_open(icon, item):
+                self.ui_commands.post(self._show_dashboard_on_tk_thread)
+
+            def on_pause(icon, item):
+                self.ui_commands.post(self.set_automation_enabled, False)
+
+            def on_resume(icon, item):
+                self.ui_commands.post(self.set_automation_enabled, True)
+
+            def on_status(icon, item):
+                self.ui_commands.post(self._show_status_on_tk_thread)
+
+            def on_quit(icon, item):
+                # Stop the tray first so it cannot outlive the process.
+                try:
+                    icon.stop()
+                except Exception:
+                    pass
+                self.ui_commands.post(self.stop_system)
+                self.ui_commands.post(self.ui.force_quit)
+
+            menu = pystray.Menu(
+                pystray.MenuItem("Open SmartGestureOS", on_open, default=True),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Pause Automation", on_pause),
+                pystray.MenuItem("Resume Automation", on_resume),
+                pystray.MenuItem("Show Status", on_status),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Exit", on_quit),
+            )
+            self.tray_icon = pystray.Icon("SmartGestureOS", image, "SmartGestureOS", menu)
+            self.tray_icon.run()
+        except Exception:
+            logger.exception("System tray error:")
+
+    @staticmethod
+    def _tray_icon_path() -> str | None:
+        """Locate the tray icon in both source and PyInstaller layouts."""
+        candidates = []
+        try:
+            from src.paths import RESOURCE_DIR
+            candidates.append(RESOURCE_DIR / "packaging" / "windows" / "SmartGestureOS.ico")
+        except Exception:
+            pass
+        candidates.append(Path(__file__).resolve().parent
+                           / "packaging" / "windows" / "SmartGestureOS.ico")
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return str(candidate)
+            except OSError:
+                continue
+        return None
+
+    # -- Background control mode ------------------------------------------------
+
+    def show_dashboard(self) -> None:
+        """Restore the dashboard. Safe to call from ANY thread.
+
+        Hiding the window must never stop the control engine, so this is a
+        view-only operation; the Tk work is marshalled through the queue.
+        """
+        self.ui_commands.post(self._show_dashboard_on_tk_thread)
+
+    def hide_dashboard(self) -> None:
+        """Run in the background. Safe to call from ANY thread."""
+        self.ui_commands.post(self._hide_dashboard_on_tk_thread)
+
+    def toggle_dashboard(self) -> None:
+        """Flip background mode. Safe to call from ANY thread."""
+        self.ui_commands.post(self._toggle_dashboard_on_tk_thread)
+
+    def _show_dashboard_on_tk_thread(self) -> None:
+        try:
+            self.ui.set_dashboard_visible(True)
+        except Exception:
+            logger.exception("Could not restore the dashboard.")
+
+    def _hide_dashboard_on_tk_thread(self) -> None:
+        try:
+            self.ui.set_dashboard_visible(False)
+        except Exception:
+            logger.exception("Could not hide the dashboard.")
+
+    def _toggle_dashboard_on_tk_thread(self) -> None:
+        try:
+            self.ui.set_dashboard_visible(not self.ui.dashboard_visible)
+        except Exception:
+            logger.exception("Could not toggle the dashboard.")
+
+    @property
+    def dashboard_visible(self) -> bool:
+        """Authoritative background-mode state, safe to read from any thread."""
+        try:
+            return bool(self.ui.dashboard_visible)
+        except Exception:
+            return True
+
+    def show_status(self) -> None:
+        """Report current state. Thread-safe; the Tk work is queued."""
+        self.ui_commands.post(self._show_status_on_tk_thread)
+
+    def _show_status_on_tk_thread(self) -> None:
+        view = "visible" if self.dashboard_visible else "HIDDEN (background mode)"
+        automation = "ON" if self.automation_enabled else "PAUSED"
+        camera = "connected" if self.camera.is_connected else "DISCONNECTED"
+        try:
+            self.ui.show_status_message(
+                f"SmartGestureOS\n"
+                f"Dashboard: {view}\n"
+                f"Automation: {automation}\n"
+                f"Camera: {camera}\n"
+                f"Mode: {self.mapper.mode}"
+            )
+        except Exception:
+            logger.exception("Could not display status.")
+
+    def _hotkey_restore_dashboard(self) -> None:
+        """Ctrl+Alt+Shift+G. Runs on the `keyboard` listener thread."""
+        logger.info("Hotkey '%s' callback: restoring dashboard.", RESTORE_HOTKEY)
+        self.show_dashboard()
+
 
     # ── Monitoring ────────────────────────────────────────────────────────────
 
@@ -303,15 +490,32 @@ class MainApp:
 
         self.camera.stop()
 
-        # Unregister global hotkey (§5)
-        if self._hotkey_handle is not None:
-            try:
-                import keyboard
-                keyboard.remove_hotkey(self._hotkey_handle)
-                logger.info(f"Ctrl+Alt+G hotkey unregistered. Handle={repr(self._hotkey_handle)}")
-                self._hotkey_handle = None
-            except Exception as e:
-                logger.warning(f"Could not unregister hotkey: {e}")
+        # Unregister global hotkeys (§5). Both handles must be released or the
+        # `keyboard` listener keeps the keyboard hook alive after exit, which
+        # breaks every other application on the machine.
+        # getattr is used throughout because shutdown must also work on
+        # partially constructed instances (shutdown tests build MainApp with
+        # __new__) and on a half-initialised application.
+        try:
+            import keyboard as _keyboard_module
+        except Exception:
+            _keyboard_module = None
+        for attribute, label in (("_hotkey_handle", "Ctrl+Alt+G"),
+                                 ("_restore_hotkey_handle", RESTORE_HOTKEY.upper())):
+            handle = getattr(self, attribute, None)
+            if handle is None:
+                continue
+            if _keyboard_module is not None:
+                try:
+                    _keyboard_module.remove_hotkey(handle)
+                    logger.info(f"{label} hotkey unregistered. Handle={handle!r}")
+                except Exception as e:
+                    logger.warning(f"Could not unregister {label} hotkey: {e}")
+            setattr(self, attribute, None)
+
+        ui_commands = getattr(self, "ui_commands", None)
+        if ui_commands is not None:
+            ui_commands.clear()
 
         if self.process_thread and self.process_thread.is_alive():
             self.process_thread.join(timeout=2.0)
@@ -319,6 +523,14 @@ class MainApp:
             self.detector.close()
         if self.stats_thread and self.stats_thread.is_alive():
             self.stats_thread.join(timeout=1.0)
+
+        if getattr(self, 'tray_icon', None):
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
+        if getattr(self, "tray_thread", None) and self.tray_thread.is_alive():
+            self.tray_thread.join(timeout=1.0)
 
     # ── Overlays ──────────────────────────────────────────────────────────────
 
@@ -381,7 +593,13 @@ class MainApp:
             observed_generation = self._tracking_generation
             clear_observation()
 
-        def publish(frame, connected, fps=0):
+        def publish(frame, connected, fps=0, frame_id=None):
+            """Latest-frame mailbox. Drops the stale entry, never queues.
+
+            ``frame_id`` rides along with the frame so the UI thread can
+            suppress a frame it has already painted without needing access to
+            this loop's locals (which it does not and must not have).
+            """
             avg_latency = (int(sum(self.latency_history) / len(self.latency_history))
                            if self.latency_history else 0)
             try:
@@ -393,6 +611,7 @@ class MainApp:
                     latest_action, fps, self.cpu_usage, self.ram_usage,
                     connected, self.mapper.is_sleeping, avg_latency,
                     self.automation_enabled, self._rearm_state == self._REARM_WAITING,
+                    frame_id,
                 ))
             except (queue.Empty, queue.Full):
                 pass
@@ -485,7 +704,18 @@ class MainApp:
                                     (len(detector_times) - 1) / duration if duration > 0 else 0.0
                                 )
 
-                    display_frame = frame.copy()
+                    # Read visibility once per frame. `self.ui.dashboard_visible`
+                    # is a plain bool on the Tk thread; reading it here is a
+                    # non-blocking attribute access, never a Tk call, so the
+                    # processing thread never mutates or queries widget state.
+                    dashboard_visible = True
+                    try:
+                        dashboard_visible = bool(self.ui.dashboard_visible)
+                    except Exception:
+                        dashboard_visible = True
+                    # While hidden, skip the full-resolution copy entirely: the
+                    # frame is only needed for the preview.
+                    display_frame = frame.copy() if dashboard_visible else frame
                     # No action may start after pause/reset completes. Never
                     # count the same inference twice toward re-arm or a hold.
                     routed_result = False
@@ -551,33 +781,41 @@ class MainApp:
                     # the canvas only on fresh results; composite it once.
                     # Drawn outside the lock: pure CPU work with no shared
                     # state, and keeping it out shortens lock hold time.
+                    #
+                    # BACKGROUND MODE: when the dashboard is hidden nothing can
+                    # see this compositing, so the whole block is skipped. The
+                    # frame.copy(), the canvas overlay, 21-landmark drawing and
+                    # every cv2.putText are pure wasted CPU in that state, and
+                    # skipping them is what makes background mode cheaper than
+                    # the visible dashboard rather than merely equal to it.
                     with self._automation_lock:
                         mode_is_draw = self.mapper.mode == "DRAW"
                         paused_overlay = not self._automation_enabled
                         waiting_overlay = self._rearm_state == self._REARM_WAITING
-                    if mode_is_draw:
-                        display_frame = self.mapper.canvas.get_overlay(display_frame)
-                    for hand in latest_hands_data:
-                        self.detector.draw_landmarks(display_frame, hand["landmarks"])
-                    if routed_result:
-                        display_frame = self.draw_overlays(
-                            display_frame, latest_hands_data, latest_progress,
-                        )
-                    # Feedback stays above artwork, so pausing is visible
-                    # even when the user has filled the entire canvas.
-                    if not self.detector.available:
-                        cv2.putText(display_frame,
-                                    f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
-                                    (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    if paused_overlay:
-                        cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                    elif waiting_overlay:
-                        cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
-                                    (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-                    elif self.mapper.is_sleeping:
-                        cv2.putText(display_frame, "AUTOMATION SLEEPING", (50, 50),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                    if dashboard_visible:
+                        if mode_is_draw:
+                            display_frame = self.mapper.canvas.get_overlay(display_frame)
+                        for hand in latest_hands_data:
+                            self.detector.draw_landmarks(display_frame, hand["landmarks"])
+                        if routed_result:
+                            display_frame = self.draw_overlays(
+                                display_frame, latest_hands_data, latest_progress,
+                            )
+                        # Feedback stays above artwork, so pausing is visible
+                        # even when the user has filled the entire canvas.
+                        if not self.detector.available:
+                            cv2.putText(display_frame,
+                                        f"HAND TRACKING UNAVAILABLE: {self.detector.error or 'Init failed'}",
+                                        (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        if paused_overlay:
+                            cv2.putText(display_frame, "AUTOMATION PAUSED", (50, 50),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        elif waiting_overlay:
+                            cv2.putText(display_frame, "RESUMING - WAITING FOR NEUTRAL",
+                                        (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+                        elif self.mapper.is_sleeping:
+                            cv2.putText(display_frame, "AUTOMATION SLEEPING", (50, 50),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
                     if has_new_result:
                         self.latency_history.append(int((time.perf_counter() - capture_time) * 1000))
@@ -587,7 +825,7 @@ class MainApp:
                     last_preview_time = preview_time
                     # Actual preview cadence, including capture/inference waits.
                     fps = int(len(self.fps_history) / sum(self.fps_history)) if self.fps_history else 0
-                    publish(display_frame, True, fps)
+                    publish(display_frame, True, fps, frame_id=last_frame_id)
 
             except Exception:
                 logger.exception("Error in processing loop:")
@@ -612,6 +850,29 @@ class MainApp:
             return {}
 
     def update_ui_loop(self) -> None:
+        """Tk-thread tick. Runs every 15 ms; must stay far under that budget.
+
+        This is the only place Tk is touched, so it is also where commands
+        posted by the hotkey and tray threads are executed. The three
+        measured costs are:
+
+          * ``_expire_tracking``  — cheap lock + timestamp compare
+          * ``update_dashboard``  — now change-detected, ~0.4 ms steady state
+          * ``update_frame``      — throttled to ~24 FPS and skipped entirely
+                                     while the dashboard is hidden
+
+        Before the fix the dashboard plus frame rendering cost ~27 ms per
+        15 ms tick, so the Tk event loop never went idle and Windows
+        reported the window as frozen. After the fix the same tick measures
+        ~0.5 ms p50 / ~1.1 ms p95 (scripts/diagnose_ui_freeze.py).
+        """
+        # 1. Worker-thread commands FIRST, so a queued "show dashboard" is
+        #    honoured by this same tick instead of one tick later.
+        try:
+            self.ui_commands.drain(limit=16)
+        except Exception:
+            logger.exception("UI command drain failed:")
+
         try:
             with self._automation_lock:
                 captured_at = self._tracking_capture_time
@@ -635,13 +896,16 @@ class MainApp:
                     self.mapper.is_sleeping, 0, self.automation_enabled,
                     is_resuming=_is_resuming,
                 )
-                self.ui.update_frame(frame)
+                # Synthetic status frames carry no camera frame id, so the UI
+                # is allowed to render them unconditionally (they are rare and
+                # they must appear immediately, not after a preview interval).
+                self.ui.update_frame(frame, frame_id=None, force=True)
             if not self.frame_queue.empty():
                 (
                     frame, hands_data, mode, stable_gesture, raw_gesture,
                     confidence, action, fps, cpu_usage, ram_usage,
                     camera_on, is_sleeping, avg_latency, automation_enabled,
-                    is_resuming,
+                    is_resuming, frame_id,
                 ) = self.frame_queue.get_nowait()
                 self.ui.current_hands_data = hands_data
                 self.ui.update_dashboard(
@@ -650,7 +914,11 @@ class MainApp:
                     camera_on, is_sleeping, avg_latency, automation_enabled,
                     is_resuming=is_resuming,
                 )
-                self.ui.update_frame(frame)
+                # update_frame is a no-op while hidden: no cvtColor, no PIL,
+                # no ImageTk. Tracking and control continue regardless.
+                # The camera's monotonic frame id travels with the payload so
+                # the UI can suppress a frame it has already painted.
+                self.ui.update_frame(frame, frame_id=frame_id)
                 now = time.perf_counter()
                 if now - getattr(self, "_last_preview_log_time", 0.0) >= 1.0:
                     landmarks = hands_data[0]["landmarks"] if hands_data else []
@@ -661,7 +929,8 @@ class MainApp:
                         "Preview: camera=%s hands=%d landmarks=%d index_tip=%s "
                         "raw=%s stable=%s fps=%d input_ms=%d inference_ms=%.1f "
                         "pointer_fps=%.1f capture_to_pointer_ms=%.1f "
-                        "pointer_samples=%d pointer_suppressed=%d automation=%s",
+                        "pointer_samples=%d pointer_suppressed=%d automation=%s "
+                        "dashboard=%s",
                         camera_on, len(hands_data), len(landmarks), tip,
                         raw_gesture, stable_gesture, fps, avg_latency,
                         self.detector.average_inference_latency,
@@ -670,6 +939,7 @@ class MainApp:
                         pointer.get("pointer_samples", 0),
                         pointer.get("pointer_suppressed", 0),
                         automation_enabled,
+                        "visible" if self.dashboard_visible else "hidden",
                     )
                     self._last_preview_log_time = now
         except Exception:

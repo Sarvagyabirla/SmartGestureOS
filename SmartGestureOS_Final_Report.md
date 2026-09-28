@@ -1,6 +1,6 @@
 # SmartGestureOS Project Validation Report
 
-**Updated:** 2026-09-27
+**Updated:** 2026-09-28
 **Application version:** 0.9.0
 
 This is an engineering status report, not a claim that all product acceptance
@@ -28,7 +28,8 @@ full scope, prioritized ten-step plan and latest validation.
 ## Automated results
 
 - Latest test counts and exact build artifacts are recorded in the current
-  execution evidence above; the starting baseline had **356 passing tests**.
+  execution evidence above; the starting baseline had **356 passing tests**;
+  the current suite is **495 tests, 0 failures** after ActionExecutor integration.
 - `compileall` for the application and tests: passed.
 - `pip check`: no broken requirements found.
 - Canonical MSIX manifest XML and both packaging PowerShell scripts parse.

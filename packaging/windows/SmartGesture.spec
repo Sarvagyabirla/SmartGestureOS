@@ -93,6 +93,12 @@ a = Analysis(
         'platformdirs',
         'keyboard',
         'pywinstyles',
+        # Background Control Mode tray. pystray imports its Win32 backend
+        # dynamically, so it is invisible to PyInstaller's static analysis.
+        'pystray',
+        'pystray._win32',
+        'pystray._base',
+        'pystray._win32_adapter',
     ],
     hookspath=[],
     hooksconfig={},

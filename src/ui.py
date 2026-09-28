@@ -1,15 +1,38 @@
 import customtkinter as ctk
 from PIL import Image, ImageTk
 import cv2
+import time
 from collections import deque
 import warnings
 from src.logger import logger
+from src.ui_commands import PreviewBudget, DEFAULT_PREVIEW_FPS
 
 # Suppress the CustomTkinter warning about using PhotoImage instead of CTkImage
 # We intentionally use PhotoImage to prevent memory leaks in the fast render loop.
 warnings.filterwarnings("ignore", message=".*Given image is not CTkImage.*")
 
 class SmartGestureApp(ctk.CTk):
+    # Class-level defaults for the render-budget / background-mode state.
+    # Partially constructed instances (tests use ``object.__new__``) must stay
+    # usable, and Tkinter's ``__getattr__`` would otherwise recurse into
+    # ``self.tk`` and raise RecursionError instead of a clear AttributeError.
+    preview_budget = None
+    _preview_enabled = True
+    _dashboard_visible = True
+    _minimize_to_tray = True
+    _last_size_probe = 0.0
+    _displayed_progress = 0.0
+    _last_history_action = None
+    current_frame_id = None
+    frames_rendered = 0
+    frames_suppressed_hidden = 0
+    _auto_frame_id = 0
+    #: Per-instance cache of last-configured widget values. Declared at
+    #: class scope only so a partially constructed instance still resolves the
+    #: attribute; ``_configure_if_changed`` rebinds it per instance on first
+    #: use, which keeps two instances from sharing state.
+    _configured = None
+
     def __init__(self, close_callback=None, toggle_pause_callback=None,
                  set_automation_callback=None, initial_automation_enabled=False):
         super().__init__()
@@ -176,7 +199,150 @@ class SmartGestureApp(ctk.CTk):
         self.frame_width = 750
         self.frame_height = 500
 
+        # ── Render budget / background mode ──────────────────────────────────
+        # ``_preview_enabled`` is the single switch that makes background mode
+        # cheap: when the dashboard is hidden it is False, so update_frame()
+        # returns immediately without cvtColor, PIL or ImageTk work at all.
+        self.preview_budget = PreviewBudget(max_fps=DEFAULT_PREVIEW_FPS)
+        self._preview_enabled = True
+        self._dashboard_visible = True
+        self._minimize_to_tray = True
+        self._last_size_probe = 0.0
+        self._displayed_progress = 0.0
+        self._last_history_action = None
+        self.current_frame_id = None
+        self.frames_rendered = 0
+        self.frames_suppressed_hidden = 0
+        self._init_background_controls()
+        self.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
+    # ── Background control mode ────────────────────────────────────────────────
+
+    def _init_background_controls(self):
+        """Build the 'Run in Background' control and its status line."""
+        self.background_btn = ctk.CTkButton(
+            self.btn_frame, text="Run in Background",
+            command=self.request_hide,
+            fg_color=self.accent_color, text_color="#000000", hover_color="#00B8D4",
+        )
+        self.background_btn.pack(fill="x", pady=4)
+
+        self.background_status_label = ctk.CTkLabel(
+            self.sidebar_container,
+            text="Dashboard visible. Ctrl+Alt+Shift+G restores it.",
+            font=small_font if False else ctk.CTkFont(family="Segoe UI", size=11),
+            wraplength=280, text_color=self.muted_text,
+        )
+        self.background_status_label.grid(row=3, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        # Transient status line (tray "Show Status" and similar notices).
+        self.status_message_label = ctk.CTkLabel(
+            self.sidebar_container, text="", font=ctk.CTkFont(family="Segoe UI", size=11),
+            wraplength=280, text_color=self.accent_color,
+        )
+        self.status_message_label.grid(row=4, column=0, padx=20, pady=(0, 6), sticky="ew")
+
+    @property
+    def dashboard_visible(self) -> bool:
+        """True when the user can see the dashboard."""
+        return self._dashboard_visible
+
+    @property
+    def minimize_to_tray(self) -> bool:
+        """Whether the window's X button means 'background' rather than 'exit'."""
+        return self._minimize_to_tray
+
+    def set_minimize_to_tray(self, enabled: bool) -> None:
+        """Settings hook: X means background (True) or exit (False)."""
+        self._minimize_to_tray = bool(enabled)
+
+    def set_dashboard_visible(self, visible: bool) -> None:
+        """Show or hide the dashboard. **Tk thread only.**
+
+        Hiding does three things, in order:
+          1. ``withdraw()`` removes the window from the desktop;
+          2. preview rendering is switched OFF, so cv2/PIL/ImageTk stop
+             burning CPU for an image nobody can see;
+          3. any queued preview frame is invalidated, so restoring the window
+             cannot flash a stale frame.
+
+        The control engine, camera, detector, pointer and hotkeys are all
+        untouched: this is a VIEW change, never a control-pipeline change.
+        """
+        visible = bool(visible)
+        if visible == self._dashboard_visible:
+            return
+        self._dashboard_visible = visible
+        self._preview_enabled = visible
+        if visible:
+            # Drop whatever was queued while hidden: showing it would be a
+            # visible jump back to a stale image.
+            self.preview_budget.invalidate()
+            try:
+                self.deiconify()
+                self.lift()
+                self.focus_force()
+            except Exception as exc:
+                logger.debug("Could not raise dashboard: %s", exc)
+        else:
+            try:
+                self.withdraw()
+            except Exception as exc:
+                logger.debug("Could not hide dashboard: %s", exc)
+        self._set_background_status()
+        logger.info("Dashboard %s (preview rendering %s).",
+                    "shown" if visible else "hidden",
+                    "enabled" if self._preview_enabled else "disabled")
+
+    def request_hide(self) -> None:
+        """'Run in Background' button. Tk thread only."""
+        self.set_dashboard_visible(False)
+
+    def request_show(self) -> None:
+        """Restore the dashboard. Tk thread only."""
+        self.set_dashboard_visible(True)
+
+    def toggle_dashboard(self) -> None:
+        self.set_dashboard_visible(not self._dashboard_visible)
+
+    def _set_background_status(self) -> None:
+        if not self._dashboard_visible:
+            text = ("Running in background. Press Ctrl+Alt+Shift+G or use the "
+                    "tray icon to reopen this dashboard.")
+            color = self.accent_color
+        else:
+            text = "Dashboard visible. Ctrl+Alt+Shift+G restores it."
+            color = self.muted_text
+        try:
+            self.background_status_label.configure(text=text, text_color=color)
+        except Exception:
+            pass
+
+    def on_window_close(self):
+        """The window's X button.
+
+        Predictable by design (never a surprise): if "minimize to tray on
+        close" is enabled the X means "run in background", otherwise it means
+        "exit". A user can therefore never hide the UI and be unable to get
+        it back.
+        """
+        if self._minimize_to_tray:
+            self.set_dashboard_visible(False)
+        else:
+            self.force_quit()
+
     def on_closing(self):
+        """Back-compatible alias for the window's X button behaviour.
+
+        Historically this hid the window unconditionally, which meant that a
+        tray failure left the user with no window and no way back. It now
+        delegates to :meth:`on_window_close`, which honours the
+        minimize-to-tray setting and otherwise exits.
+        """
+        self.on_window_close()
+
+    def force_quit(self):
+        """Actually destroy the UI and trigger shutdown callbacks."""
         if self.settings_window:
             self.settings_window.destroy()
         if self.trainer_window:
@@ -205,6 +371,30 @@ class SmartGestureApp(ctk.CTk):
             text_color=self.muted_text if available else "#e38b29",
         )
         self.pause_btn.configure(text=self._pause_button_text())
+
+    def set_restore_hotkey_available(self, available):
+        """Report whether Ctrl+Alt+Shift+G could be registered."""
+        self.restore_hotkey_available = bool(available)
+        try:
+            if available:
+                self.background_status_label.configure(
+                    text="Ctrl+Alt+Shift+G restores this dashboard.",
+                    text_color=self.muted_text)
+            else:
+                self.background_status_label.configure(
+                    text=("Ctrl+Alt+Shift+G unavailable — use the tray icon or "
+                          "the taskbar to restore the dashboard."),
+                    text_color="#e38b29")
+        except Exception:
+            pass
+
+    def show_status_message(self, message: str) -> None:
+        """Transient in-dashboard status line. Tk thread only."""
+        try:
+            self.status_message_label.configure(text=message)
+            self.after(6000, lambda: self.status_message_label.configure(text=""))
+        except Exception:
+            logger.debug("Could not display status message.")
 
     def _pause_button_text(self):
         label = "Pause" if self.automation_enabled else "Resume"
@@ -278,7 +468,7 @@ class SmartGestureApp(ctk.CTk):
             "MEDIA": "#e38b29"    # Orange
         }
         color = mode_colors.get(mode, "#3a7ebf")
-        self.mode_label.configure(text=mode, text_color=color)
+        self._configure_if_changed("mode", self.mode_label, text=mode, text_color=color)
         
         # Dynamic confidence colors
         if confidence > 80:
@@ -288,70 +478,176 @@ class SmartGestureApp(ctk.CTk):
         else:
             bar_color = "#d64545" # Red
             
-        self.confidence_bar.configure(progress_color=bar_color)
-        
-        self.gesture_label.configure(text=stable_gesture)
-        self.raw_gesture_label.configure(text=raw_gesture)
-        self.conf_label.configure(text=f"Confidence: {confidence}%")
-        
-        # Smooth confidence bar animation
-        current_progress = self.confidence_bar.get()
+        self._configure_if_changed("conf_bar_color", self.confidence_bar,
+                                   progress_color=bar_color)
+
+        self._configure_if_changed("gesture", self.gesture_label, text=stable_gesture)
+        self._configure_if_changed("raw_gesture", self.raw_gesture_label, text=raw_gesture)
+        self._configure_if_changed("conf", self.conf_label, text=f"Confidence: {confidence}%")
+
+        # Smooth confidence bar animation. Driven from the cached progress
+        # instead of confidence_bar.get(): a steady value then costs no Tcl
+        # round trip, and it snaps to the target once the remaining step is
+        # imperceptible, so an idle bar performs exactly zero set() calls.
         target_progress = confidence / 100.0
-        smooth_progress = current_progress + (target_progress - current_progress) * 0.15
-        self.confidence_bar.set(smooth_progress)
-        
-        import time
+        current_progress = self._displayed_progress
+        if abs(target_progress - current_progress) <= 0.01:
+            smooth_progress = target_progress
+        else:
+            smooth_progress = current_progress + (target_progress - current_progress) * 0.35
+        if smooth_progress != current_progress:
+            self.confidence_bar.set(smooth_progress)
+            self._displayed_progress = smooth_progress
+
         current_time = time.time()
         if current_time - self.last_stat_update > 0.5:
-            self.fps_label.configure(text=f"Processing: {fps} fps")
-            self.latency_label.configure(text=f"Input: {avg_latency}ms")
-            self.cpu_label.configure(text=f"CPU: {cpu_usage:.1f}%")
-            self.ram_label.configure(text=f"RAM: {ram_usage:.1f} MB")
             self.last_stat_update = current_time
-        
-        if action:
+            self._configure_if_changed("fps", self.fps_label, text=f"Processing: {fps} fps")
+            self._configure_if_changed("latency", self.latency_label, text=f"Input: {avg_latency}ms")
+            self._configure_if_changed("cpu", self.cpu_label, text=f"CPU: {cpu_usage:.1f}%")
+            self._configure_if_changed("ram", self.ram_label, text=f"RAM: {ram_usage:.1f} MB")
+
+        if action and action != self._last_history_action:
+            self._last_history_action = action
             self.add_to_history(action)
             
         if camera_on:
-            self.camera_state_label.configure(text="● CAMERA ACTIVE", text_color=self.accent_color)
+            self._configure_if_changed(
+                "camera_state", self.camera_state_label,
+                text="● CAMERA ACTIVE", text_color=self.accent_color)
         else:
-            self.camera_state_label.configure(text="● CAMERA DISCONNECTED", text_color="#d64545")
+            self._configure_if_changed(
+                "camera_state", self.camera_state_label,
+                text="● CAMERA DISCONNECTED", text_color="#d64545")
 
         # Update the UI cache ONLY from the authoritative backend value.
         self.automation_enabled = automation_enabled
         self._is_resuming = is_resuming
         if not automation_enabled:
-            self.automation_state_label.configure(text="● AUTOMATION PAUSED", text_color="#d64545")
-            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#2fa572", hover_color="#26855c")
+            self._configure_if_changed(
+                "automation_state", self.automation_state_label,
+                text="● AUTOMATION PAUSED", text_color="#d64545")
+            self._configure_pause_button("#2fa572", "#26855c")
         elif is_resuming:
             # Distinct RESUMING state: automation enabled but awaiting neutral
-            self.automation_state_label.configure(
-                text="● RESUMING — LOWER HAND BRIEFLY", text_color="#e38b29"
-            )
-            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")
+            self._configure_if_changed(
+                "automation_state", self.automation_state_label,
+                text="● RESUMING — LOWER HAND BRIEFLY", text_color="#e38b29")
+            self._configure_pause_button("#d64545", "#b33939")
         elif is_sleeping:
-            self.automation_state_label.configure(text="● AUTOMATION SLEEPING", text_color="#d64545")
-            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")
+            self._configure_if_changed(
+                "automation_state", self.automation_state_label,
+                text="● AUTOMATION SLEEPING", text_color="#d64545")
+            self._configure_pause_button("#d64545", "#b33939")
         else:
-            self.automation_state_label.configure(text="● AUTOMATION ON", text_color=self.accent_color)
-            self.pause_btn.configure(text=self._pause_button_text(), fg_color="#d64545", hover_color="#b33939")
+            self._configure_if_changed(
+                "automation_state", self.automation_state_label,
+                text="● AUTOMATION ON", text_color=self.accent_color)
+            self._configure_pause_button("#d64545", "#b33939")
 
-    def update_frame(self, frame):
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        label_w = self.video_label.winfo_width()
-        label_h = self.video_label.winfo_height()
-        
-        if label_w > 10 and label_h > 10:
-            self.frame_width = label_w
-            self.frame_height = label_h
-            
+    def _configure_pause_button(self, fg_color, hover_color):
+        """Recolour the Pause/Resume button only when it actually changes."""
+        self._configure_if_changed(
+            "pause_btn", self.pause_btn, text=self._pause_button_text(),
+            fg_color=fg_color, hover_color=hover_color)
+
+    def _configure_if_changed(self, key, widget, **kwargs):
+        """``widget.configure(**kwargs)`` only when a value really changed.
+
+        This is the single most important performance guard in the UI. A
+        CustomTkinter ``configure()`` is a Tcl round trip costing roughly a
+        millisecond, so the previous unconditional dozen-per-tick cost 14.7 ms
+        and left the Tk event loop with no idle time at all — which is exactly
+        how a Tk window comes to be reported as "not responding".
+
+        The cache is keyed per call site, so distinct widgets never share an
+        entry, and a fresh key always renders (first paint is never skipped).
+        """
+        cache = self.__dict__.get("_configured")
+        if cache is None:
+            cache = {}
+            self.__dict__["_configured"] = cache
+        previous = cache.get(key)
+        if previous is not None and len(previous) == len(kwargs) \
+                and all(previous[name] == value for name, value in kwargs.items()):
+            return False
+        cache[key] = dict(kwargs)
         try:
-            image = Image.fromarray(rgb_frame)
-            image = image.resize((self.frame_width, self.frame_height))
-            self.current_imgtk = ImageTk.PhotoImage(image=image)
-            
+            widget.configure(**kwargs)
+        except Exception as exc:
+            logger.debug("Widget update skipped for %s: %s", key, exc)
+            return False
+        return True
+
+    def update_frame(self, frame, frame_id=None, force=False):
+        """Render one preview frame.
+
+        PERFORMANCE CONTRACT (measured, see scripts/diagnose_ui_freeze.py):
+        cvtColor + PIL resize + ImageTk.PhotoImage + label.configure cost
+        ~12 ms at 1280x720 on the development machine. The Tk thread runs on a
+        15 ms budget, so doing that on every tick starved the Tk event loop
+        and Windows reported the window as "not responding".
+
+        Guards that make this cheap:
+
+        1. ``self._preview_enabled`` is False while the dashboard is hidden,
+           so background mode does zero conversion work.
+        2. ``PreviewBudget`` rate-limits to ~24 FPS and refuses a frame that is
+           already on screen, so a backlog can never be rendered.
+        3. The image is resized with a single cv2 INTER_AREA pass instead of
+           a full-size cvtColor followed by a PIL resize, ~3x cheaper.
+
+        ``force`` bypasses only the *rate limit* (never the hidden check) and is
+        used for synthetic status frames such as "CAMERA DISCONNECTED", which
+        must appear immediately. ``frame_id`` should be the camera's own
+        monotonic frame counter; ``id(frame)`` is deliberately NOT used as a
+        fallback because CPython recycles ``id()`` for freed objects.
+        """
+        if not self._preview_enabled:
+            self.frames_suppressed_hidden += 1
+            return
+
+        if frame_id is None:
+            self._auto_frame_id += 1
+            frame_id = self._auto_frame_id
+        if not force and not self.preview_budget.should_render(True, frame_id):
+            return
+
+        target_w, target_h = self._target_size()
+        if target_w is None:
+            return
+
+        try:
+            # INTER_AREA is the correct filter for downscaling and avoids the
+            # extra full-resolution cvtColor + PIL resize entirely.
+            height, width = frame.shape[:2]
+            if width != target_w or height != target_h:
+                frame = cv2.resize(frame, (target_w, target_h),
+                                   interpolation=cv2.INTER_AREA)
+            # cv2 gives BGR; PIL wants RGB. Converting AFTER the resize means
+            # the per-pixel work happens on the small image, not the 1280x720.
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            self.current_imgtk = ImageTk.PhotoImage(image=Image.fromarray(rgb))
             self.video_label.configure(image=self.current_imgtk)
+            self.current_frame_id = frame_id
+            self.preview_budget.mark_rendered(frame_id, force=force)
+            self.frames_rendered += 1
         except Exception as e:
-            from src.logger import logger
-            logger.debug(f"Frame update skipped during resize: {e}")
+            logger.debug("Frame update skipped during resize: %s", e)
+
+    def _target_size(self):
+        """Cached label size. Querying Tk geometry per frame is itself a cost."""
+        now = time.perf_counter()
+        if now - self._last_size_probe < 0.5:
+            return self.frame_width, self.frame_height
+        self._last_size_probe = now
+        try:
+            width = self.video_label.winfo_width()
+            height = self.video_label.winfo_height()
+        except Exception:
+            return None
+        if width > 10 and height > 10:
+            # Keep even dimensions; some Tk builds handle odd ones poorly.
+            self.frame_width = width - (width % 2)
+            self.frame_height = height - (height % 2)
+        return self.frame_width, self.frame_height

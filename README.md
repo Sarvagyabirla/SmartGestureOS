@@ -108,7 +108,114 @@ Camera selection is in Settings and applies after saving and restarting.
 To inspect tracking without activating desktop actions, run
 `python main.py --start-paused`.
 
+### Running in the background
+
+Once Resume is armed you do **not** need the dashboard window open. Press
+**Run in Background** (or close the window with *minimize to tray on close*
+enabled) and the dashboard disappears while gesture control continues
+normally.
+
+| Action | How |
+|---|---|
+| Hide the dashboard | **Run in Background** button, or the window's X button |
+| Pause / Resume automation | **Ctrl+Alt+G** (works while hidden) |
+| Restore the dashboard | **Ctrl+Alt+Shift+G**, or the tray icon, or the taskbar button |
+| Show current status | Tray icon → **Show Status** |
+| Exit | Tray icon → **Exit**, or the window's X with *minimize to tray on close* disabled |
+
+Background mode is strictly cheaper than the visible dashboard: the camera,
+MediaPipe, classifier, pointer and event engine keep running, while preview
+rendering, canvas compositing and landmark drawing stop completely. On the
+development machine this is a measured **22 % lower CPU and zero preview
+renders** versus the visible dashboard — see
+[docs/UI_FREEZE_ROOT_CAUSE.md](docs/UI_FREEZE_ROOT_CAUSE.md).
+
+The two hotkeys are deliberately separate and are never overloaded:
+**Ctrl+Alt+G is the emergency stop**, and it stays reachable when no window
+is visible.
+
 ---
+
+## Tech Stack
+
+| Layer | Technology | Why it is here |
+|---|---|---|
+| Language | **Python 3.11** (validated on 3.11.9) | Desktop runtime for the whole product |
+| Computer vision | **OpenCV** (`opencv-contrib-python`) | Webcam capture, BGR↔RGB, resize, overlay drawing |
+| Hand tracking | **MediaPipe Hand Landmarker 0.10.x** | 21 landmarks from a single RGB frame; the only ML model in the pipeline |
+| Numerics | **NumPy** | Landmark geometry, filter math, canvas pixel buffers |
+| Desktop UI | **CustomTkinter** on **Tkinter** | Dark-theme dashboard, buttons, canvas preview |
+| Imaging | **Pillow** (`ImageTk`, `ImageGrab`) | PhotoImage conversion and full-screen screenshots |
+| Keyboard hooks | **keyboard** | Global hotkeys (Pause/Resume, restore dashboard) |
+| Windows API | **ctypes** / Win32 | `SetCursorPos`, `mouse_event`, `GetDoubleClickTime`, DXVA2 brightness |
+| Audio | **pycaw** + **comtypes** | System volume up/down and mute over Core Audio |
+| Brightness | **screen-brightness-control** + DXVA2 via ctypes | Laptop panels and external displays |
+| Speech | **pyttsx3** | Asynchronous spoken feedback; never on the pointer path |
+| Metrics | **psutil** | CPU and RAM for the dashboard |
+| Tray icon | **pystray** | System-tray menu for Background Control Mode |
+| Paths | **platformdirs** | User-writable data under `%LOCALAPPDATA%` |
+| Packaging | **PyInstaller** (ONEDIR, `console=False`) | Self-contained `SmartGestureOS.exe`, no Python needed |
+| Installer | **Inno Setup 6** | `SmartGestureOS-Setup-v0.9.0.exe` |
+| Build/CI | **PowerShell** + **GitHub Actions** | Build, test, installer and release pipelines |
+| Website | **HTML / CSS / JavaScript** on **GitHub Pages** | Static project site, no backend |
+
+### Database and storage
+
+**Database: none required.**
+
+SmartGestureOS is a single-user, offline Windows desktop application. There is
+no server, no multi-user account system, no relational data and no cloud
+sync, so a SQL/NoSQL database would add a dependency and a failure mode with
+no benefit. Persistence is deliberately local-first, plain files and JSON:
+
+| Path (under `%LOCALAPPDATA%\SmartGestureOS`) | Contents |
+|---|---|
+| `profiles\` | Gesture profiles and the active-profile pointer |
+| `custom_gestures\` | User-trained gesture templates |
+| `screenshots\` | Saved screenshots (PNG) |
+| `drawings\` | Saved canvas drawings (PNG) |
+| `logs\` | Rotating application log |
+| `benchmarks\` | Local performance measurements |
+
+Read-only resources (`models\`, `config\`) ship inside the application and
+are never written to — important because the program installs under
+`Program Files`, which is read-only for normal users.
+
+---
+
+## Performance
+
+These are **targets**, not guaranteed values. Actual performance depends on
+hardware, lighting and camera driver.
+
+| Metric | Target | Measured (dev machine) |
+|---|---|---|
+| Camera capture | ~30 fps where hardware allows | **14.7 fps** (USB webcam limit) |
+| Detector / inference | as close to camera rate as practical | **14.5 fps** (tracks camera, not the bottleneck) |
+| Preview (dashboard visible) | 20–30 fps | **~9 fps** with 30 fps UI tick budget |
+| Preview (background mode) | disabled | **0 renders** (439 suppressed) |
+| Pointer | close to detector rate | tracks detector |
+| Inference latency | < 100 ms typical | **p50 57 ms / p95 66 ms** |
+| Tk event-loop delay | no multi-hundred-ms stalls | **p50 0.49 ms / p95 1.08 ms** |
+| RAM | stable over soak | **295 → 299 MB** (30 s) |
+| CPU (visible / background) | < 2 cores | **238 % / 185 %** |
+
+The detector is *not* inference-bound: a single MediaPipe VIDEO call measures
+~15 ms on this machine, so the ~14.5 fps detector rate is set by the camera's
+own 14.7 fps delivery, and the pipeline is keeping up with it.
+
+### Diagnosing performance yourself
+
+```powershell
+# Tk cost breakdown, visible vs hidden (no camera needed)
+.\.venv\Scripts\python.exe scripts\diagnose_ui_freeze.py --seconds 6
+
+# Full live pipeline with a real webcam, visible vs background
+.\.venv\Scripts\python.exe scripts\diagnose_runtime.py --seconds 30
+
+# Pointer path latency over a still hand image
+.\.venv\Scripts\python.exe scripts\measure_pointer_pipeline.py
+```
 
 ## Gesture Modes
 
@@ -187,19 +294,6 @@ SmartGestureOS/
 ├── GESTURES.md                # Complete gesture reference
 └── requirements.txt
 ```
-
----
-
-## Performance
-
-These are **targets**, not guaranteed values. Actual performance depends on hardware.
-
-| Metric | Target |
-|--------|--------|
-| Processing rate | ~30 fps |
-| Inference result age | < 100 ms typical |
-| RAM usage | < 500 MB |
-| CPU usage | < 2 cores |
 
 ---
 

@@ -18,3 +18,8 @@ pyttsx3==2.99
 pywinstyles==1.8
 platformdirs==4.11.7
 psutil==7.0.0
+# Background Control Mode tray icon. Already a runtime import in main.py; it
+# MUST be declared here or the frozen EXE silently loses its tray icon, and a
+# tray-less "Run in Background" leaves the user with no visible way back into
+# the dashboard. Pillow (above) supplies the icon image pystray needs.
+pystray==0.19.5
