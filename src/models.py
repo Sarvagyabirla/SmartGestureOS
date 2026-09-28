@@ -28,3 +28,19 @@ class ActionResult:
     message: str
     error: Optional[str] = None
     timestamp: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class AppStateSnapshot:
+    automation_state: str  # "PAUSED", "RESUMING", "ACTIVE", "CAMERA DISCONNECTED"
+    mode: str  # "GENERAL", "MEDIA", "DRAW"
+    raw_gesture: str
+    stable_gesture: str
+    confidence: float
+    camera_connected: bool
+    camera_fps: float
+    detector_fps: float
+    pointer_fps: float
+    inference_ms: float
+    frame_age_ms: float
+    hands_detected: int = 0

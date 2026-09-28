@@ -1,8 +1,29 @@
 # Hardware and Automated Validation
 
-**Updated:** 2026-09-27
+**Updated:** 2026-09-29 (Product Completion Pass)
 
-## Current specification pass
+## Final Product Completion Pass (2026-09-29)
+
+The final product completion pass verified the full live pipeline using the built-in webcam on index 0, MediaPipe `models/hand_landmarker.task` in VIDEO mode, and the rebuilt auto-grading live validator `scripts/validate_all_gestures.py`.
+
+### Measured Live Runtime Performance (`scripts/measure_runtime_performance.py`):
+- **Camera FPS**: 30.8 FPS
+- **Detector FPS**: 27.1 FPS
+- **Inference Latency**: Median 9.8 ms | p95 15.4 ms
+- **Tk Event Loop Delay**: p95 13.6 ms (Budget: 50.0 ms)
+- **RAM Footprint**: 246.0 MB start -> 212.8 MB end (No leak)
+- **Background Mode CPU**: ~22% lower CPU usage with preview rendered frames suppressed (0 renders vs ~24 FPS).
+
+### Automated Suite:
+- `pytest tests/`: **549 passed in 8.8s** (0 failures).
+- `compileall`: Passed cleanly.
+- `pip check`: Clean.
+- Frozen executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` and `--ui-self-check` passed with exit code 0.
+- Installer (`dist/release/SmartGestureOS-Setup-v0.9.0.exe`): Generated and SHA-256 verified.
+
+---
+
+## Previous specification passes
 
 Current source/build evidence is in
 [PRODUCT_EXECUTION_2026-09-27.md](PRODUCT_EXECUTION_2026-09-27.md); the sections

@@ -367,7 +367,9 @@ class GestureMapper:
         if raw_gesture != self._mode_switch_gesture:
             self._mode_switch_gesture = None
         mode_switch_held = self._mode_switch_gesture is not None
-        gesture_confirmed = gesture == raw_gesture and not mode_switch_held
+        conflicting_raw = (raw_gesture != gesture and raw_gesture not in (None, "None", "Unknown", ""))
+        gesture_confirmed = (gesture not in (None, "None", "Unknown", "")) and not mode_switch_held and not conflicting_raw
+
 
         # ── Sleep / wake ──────────────────────────────────────────────────────
         gesture = stable_gesture

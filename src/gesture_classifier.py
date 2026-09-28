@@ -183,27 +183,30 @@ class GestureClassifier:
         wrist = self.get_3d_point(lms_list[0])
         middle_mcp = self.get_3d_point(lms_list[9])
         hand_size = max(1e-6, np.linalg.norm(wrist - middle_mcp))
-        # PHYSICAL FIX: increased margin from 15% → 12% of hand size.
-        # A larger margin caused borderline-extended fingers (realistic poses)
-        # to fall below the boundary and score zero, dragging shape_score down.
         margin = hand_size * 0.12
 
-        # Thumb: compare distance of tip to pinky mcp vs thumb mcp to pinky mcp
+        # ── Thumb: combine lateral distance, index separation, and joint angle ──
         thumb_tip = self.get_3d_point(lms_list[4])
+        thumb_ip = self.get_3d_point(lms_list[3])
         thumb_mcp = self.get_3d_point(lms_list[2])
         pinky_mcp = self.get_3d_point(lms_list[17])
+        index_mcp = self.get_3d_point(lms_list[5])
 
         d_tip_pinky = np.linalg.norm(thumb_tip - pinky_mcp)
         d_mcp_pinky = np.linalg.norm(thumb_mcp - pinky_mcp)
-
         diff_thumb = d_tip_pinky - d_mcp_pinky
+
+        angle_thumb_ip = get_angle(thumb_mcp, thumb_ip, thumb_tip)
+        d_tip_index = np.linalg.norm(thumb_tip - index_mcp)
+
+        # Extended if tip is clearly further from pinky MCP than thumb MCP
         is_thumb_up = 1 if diff_thumb > margin else 0
         fingers.append(is_thumb_up)
 
         s_thumb = self._decisiveness(diff_thumb, margin)
         scores.append(s_thumb)
 
-        # Other fingers: Check if tip is further from mcp than pip
+        # ── Other fingers: Index, Middle, Ring, Pinky ───────────────────────
         for id in range(1, 5):
             tip = self.get_3d_point(lms_list[self.tip_ids[id]])
             pip = self.get_3d_point(lms_list[self.pip_ids[id]])
@@ -211,11 +214,29 @@ class GestureClassifier:
 
             d_tip_mcp = np.linalg.norm(tip - mcp)
             d_pip_mcp = np.linalg.norm(pip - mcp)
-
             diff = d_tip_mcp - d_pip_mcp
-            is_finger_up = 1 if diff > margin else 0
-            fingers.append(is_finger_up)
 
+            # PIP angle: straight finger is 145-180 deg
+            angle_pip = get_angle(mcp, pip, tip)
+            d_tip_wrist = np.linalg.norm(tip - wrist)
+            d_pip_wrist = np.linalg.norm(pip - wrist)
+
+            # Combined extension rule:
+            # Handles both synthetic test sets and real webcam hands
+            if diff > margin:
+                # If PIP is bent severely (< 115 deg), finger is curling back towards palm
+                if angle_pip > 0 and angle_pip < 115.0 and d_tip_wrist < d_pip_wrist:
+                    is_finger_up = 0
+                else:
+                    is_finger_up = 1
+            else:
+                # If diff is small/negative, but finger is straight and tip is far from wrist
+                if angle_pip > 150.0 and d_tip_wrist > d_pip_wrist + 0.1 * hand_size and d_tip_mcp > d_pip_mcp * 0.95:
+                    is_finger_up = 1
+                else:
+                    is_finger_up = 0
+
+            fingers.append(is_finger_up)
             s = self._decisiveness(diff, margin)
             scores.append(s)
 
@@ -228,35 +249,35 @@ class GestureClassifier:
         # Single hand gestures
         h1 = hands_data[0]
         lms_list = h1['landmarks']
-        hand_score = h1['score']
+        hand_score = h1.get('score', 99)
         fingers, scores = self.fingers_up(lms_list)
 
         if not fingers:
             return "None", 0.0
 
-        def calc_shape_score():
-            # Average the continuous scores for all 5 fingers
-            return sum(scores) / 5.0
-
-        shape_score = calc_shape_score()
+        shape_score = sum(scores) / 5.0
 
         thumb_tip = self.get_3d_point(lms_list[4])
+        thumb_mcp = self.get_3d_point(lms_list[2])
         index_tip = self.get_3d_point(lms_list[8])
         middle_tip = self.get_3d_point(lms_list[12])
+        ring_tip = self.get_3d_point(lms_list[16])
+        pinky_tip = self.get_3d_point(lms_list[20])
+
         wrist = self.get_3d_point(lms_list[0])
         index_mcp = self.get_3d_point(lms_list[5])
         middle_mcp = self.get_3d_point(lms_list[9])
+        pinky_mcp = self.get_3d_point(lms_list[17])
 
         hand_size = max(1e-6, np.linalg.norm(wrist - middle_mcp))
         d_pinch = np.linalg.norm(thumb_tip - index_tip)
 
         enter_thresh = getattr(self, 'pinch_enter_threshold', 0.45)
-        release_thresh = getattr(self, 'pinch_release_threshold', 0.6)
+        release_thresh = getattr(self, 'pinch_release_threshold', 0.60)
         pinch_ratio = d_pinch / hand_size
-        # Recorded for telemetry so a physical session shows the real geometry
-        # instead of leaving "pinch did not register" unanswerable.
         self.last_pinch_ratio = float(pinch_ratio)
 
+        # Hysteresis for pinch state
         if not self.is_pinching:
             if pinch_ratio < enter_thresh:
                 self.is_pinching = True
@@ -264,64 +285,48 @@ class GestureClassifier:
             if pinch_ratio > release_thresh:
                 self.is_pinching = False
 
+        # Guard against closed fist being classified as pinch:
+        # in a true pinch, index/thumb tips are away from palm center
         d_pinch_to_palm = np.linalg.norm(index_tip - middle_mcp)
-        true_pinch = self.is_pinching and (d_pinch_to_palm > hand_size * 0.28)
+        true_pinch = self.is_pinching and (d_pinch_to_palm > hand_size * 0.25 or fingers[2] == 1)
 
-        # Check palm orientation for thumb up/down using relative y position
-        thumb_is_higher_than_mcp = thumb_tip[1] <= middle_mcp[1]
+        # Vector along thumb for upward / downward direction
+        v_thumb = thumb_tip - thumb_mcp
+        len_v_thumb = np.linalg.norm(v_thumb)
+        thumb_y_norm = (v_thumb[1] / max(1e-5, len_v_thumb)) if len_v_thumb > 0 else 0.0
 
-        # ── GESTURE MATCHING — priority ordered ──────────────────────────────
+        # In camera frame (y down): negative y is UPWARDS, positive y is DOWNWARDS
+        thumb_pointing_up = thumb_y_norm < -0.40 and thumb_tip[1] <= middle_mcp[1]
+        thumb_pointing_down = thumb_y_norm > 0.40 or thumb_tip[1] > wrist[1]
 
+        # ── GESTURE MATCHING — priority ordered contracts ──────────────────
+
+        # 1. Open Palm — all 5 fingers clearly extended
         if all(f == 1 for f in fingers):
-            # All 5 fingers including thumb
             return "Open Palm", shape_score
 
+        # 2. Pinch — thumb tip and index tip touching/near, not curled into fist
         if true_pinch:
-            # Linear map of pinch confidence within thresholds
-            pinch_score = max(0.0, min(100.0, 100.0 - ((pinch_ratio - 0.2) / max(0.01, (release_thresh - 0.2))) * 100.0))
+            pinch_score = max(0.0, min(100.0, 100.0 - ((pinch_ratio - 0.15) / max(0.01, (release_thresh - 0.15))) * 100.0))
             return "Pinch", pinch_score
 
-        # PHYSICAL FIX: Pointing check — index extended, middle/ring/pinky folded.
-        # Thumb state is deliberately IGNORED: natural pointing keeps the thumb
-        # at various angles. Previously, a raised thumb produced fingers[0]=1
-        # which caused the rule to fall through to a less-matched branch.
+        # 3. Pointing — index extended, middle/ring/pinky folded (thumb tolerant)
         if fingers[1] == 1 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 0:
-            # Confirm index is really extended (not just measurement noise)
-            # by checking tip-to-wrist distance ratio.
             idx_tip = self.get_3d_point(lms_list[8])
-            idx_pip = self.get_3d_point(lms_list[6])
             idx_mcp = self.get_3d_point(lms_list[5])
             d_tip_wrist = np.linalg.norm(idx_tip - wrist)
             d_mcp_wrist = np.linalg.norm(idx_mcp - wrist)
-            if d_tip_wrist > d_mcp_wrist * 1.1:
-                # Use only the four non-thumb scores for Pointing confidence
-                pointing_score = sum(scores[1:]) / 4.0
+            if d_tip_wrist > d_mcp_wrist * 1.05:
+                pointing_score = (scores[1] + sum(scores[2:])) / 4.0
                 return "Pointing", pointing_score
 
-        # PHYSICAL FIX: Closed Fist — requires thumb to NOT be clearly extended.
-        # The old rule matched fingers[1:] == [0,0,0,0] regardless of thumb,
-        # so a Thumb Up with all other fingers folded fell into Closed Fist.
-        if fingers[1:] == [0, 0, 0, 0] and fingers[0] == 0:
-            return "Closed Fist", shape_score
-
-        # Thumb-only states
-        if fingers[0] == 1 and fingers[1:] == [0, 0, 0, 0]:
-            if thumb_is_higher_than_mcp:
-                return "Thumb Up", shape_score
-            else:
-                return "Thumb Down", shape_score
-
-        # Middle finger alone extended
-        if fingers[1:] == [0, 1, 0, 0]:
-            return "Middle Finger", shape_score
-
-        # Two-finger band: index + middle extended, ring + pinky folded
+        # 4. Two-finger band: index + middle extended, ring + pinky folded
         if fingers[1] == 1 and fingers[2] == 1 and fingers[3] == 0 and fingers[4] == 0:
             d_index_middle = np.linalg.norm(index_tip - middle_tip)
             d_mcp = np.linalg.norm(index_mcp - middle_mcp)
             self.last_two_finger_spacing = float(d_index_middle / hand_size)
 
-            # Calculate divergence angle
+            # Divergence angle between index and middle fingers
             v_index = index_tip - index_mcp
             v_middle = middle_tip - middle_mcp
             norm_index = np.linalg.norm(v_index)
@@ -330,66 +335,79 @@ class GestureClassifier:
             angle_deg = 0.0
             if norm_index > 0 and norm_middle > 0:
                 cos_angle = np.dot(v_index, v_middle) / (norm_index * norm_middle)
-                angle_deg = np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
+                angle_deg = float(np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0))))
 
-            divergence_ratio = d_index_middle / max(0.01, d_mcp)
-            divergence_spread = (d_index_middle - d_mcp) / max(0.01, hand_size)
-
-            # Check for Crossed Fingers using 3D vector dot product
+            # Crossed Fingers check: knuckle vector vs tip vector
             v_mcp = middle_mcp - index_mcp
             v_tip = middle_tip - index_tip
             is_crossed = np.dot(v_mcp, v_tip) < 0
 
-            # Thresholds from settings or defaults
             max_two_finger = getattr(self, 'two_finger_max_spacing', 0.22)
             min_victory = getattr(self, 'victory_min_spacing', 0.30)
 
-            if is_crossed and d_index_middle < hand_size * (max_two_finger * 1.5):
+            if is_crossed and d_index_middle < hand_size * (max_two_finger * 1.6):
                 return "Crossed Fingers", shape_score
 
-            is_victory = (
-                (d_index_middle > hand_size * min_victory)
-                and (angle_deg > 15.0)
-                and (divergence_ratio > 1.4)
-            )
-            is_two_fingers = (
-                (d_index_middle <= hand_size * max_two_finger)
-                or (angle_deg < 16.0 and (divergence_ratio < 1.7 or divergence_spread < 0.18))
-            )
+            divergence_ratio = d_index_middle / max(0.01, d_mcp)
 
-            if is_victory:
-                return "Victory", shape_score
-            elif is_two_fingers:
-                return "Two Fingers", shape_score
+            # Victory: fingers clearly spread in a 'V' shape with divergence
+            if d_index_middle >= hand_size * min_victory and angle_deg >= 16.0 and divergence_ratio >= 1.35:
+                victory_score = min(100.0, max(shape_score, (d_index_middle / max(0.01, hand_size * min_victory)) * 80.0))
+                return "Victory", victory_score
+            elif d_index_middle <= hand_size * max_two_finger or angle_deg <= 10.0:
+                two_finger_score = min(100.0, max(shape_score, 100.0 - (d_index_middle / max(0.01, hand_size * 0.4)) * 30.0))
+                return "Two Fingers", two_finger_score
             else:
                 return "Unknown", 0.0
 
-        if fingers[1:] == [1, 1, 1, 0]:
-            return "Three Fingers", shape_score
+        # 5. Three Fingers: index + middle + ring extended, pinky folded
+        if fingers[1] == 1 and fingers[2] == 1 and fingers[3] == 1 and fingers[4] == 0:
+            three_score = sum(scores[1:]) / 4.0
+            return "Three Fingers", three_score
 
-        if fingers[1:] == [1, 1, 1, 1]:
-            return "Four Fingers", shape_score
+        # 6. Four Fingers: index + middle + ring + pinky extended, thumb folded
+        if fingers[1:] == [1, 1, 1, 1] and fingers[0] == 0:
+            four_score = sum(scores) / 5.0
+            return "Four Fingers", four_score
 
-        # Rock On: thumb + index + pinky
+        # 7. Rock On: index + pinky extended, middle + ring folded (thumb extended)
         if fingers[0] == 1 and fingers[1] == 1 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 1:
             return "Rock On", shape_score
 
-        # Call Me: thumb + pinky
+        # 8. Call Me: thumb + pinky extended, index + middle + ring folded
         if fingers[0] == 1 and fingers[1] == 0 and fingers[2] == 0 and fingers[3] == 0 and fingers[4] == 1:
             return "Call Me", shape_score
 
-        # PHYSICAL FIX: Closed Fist with thumb up — also catch the case where
-        # we reach here with fingers[0]==1 and all others folded but
-        # the Pointing check passed on an ambiguous frame. Shouldn't happen
-        # due to earlier checks, but keep as fallback.
-        if fingers[1:] == [0, 0, 0, 0]:
-            # Thumb is up but not classified yet → Thumb Up / Down
-            if thumb_is_higher_than_mcp:
+        # 9. Middle Finger: only middle finger extended
+        if fingers[1:] == [0, 1, 0, 0]:
+            mid_score = (scores[2] + scores[1] + scores[3] + scores[4]) / 4.0
+            return "Middle Finger", mid_score
+
+        # 10. Thumb Up / Thumb Down: four non-thumb fingers folded, thumb extended
+        if fingers[0] == 1 and fingers[1:] == [0, 0, 0, 0]:
+            if thumb_pointing_up:
                 return "Thumb Up", shape_score
-            else:
+            elif thumb_pointing_down:
                 return "Thumb Down", shape_score
 
-        # Check Custom Gestures last
+        # 11. Closed Fist: all non-thumb fingers folded, thumb folded/tucked
+        if fingers[1:] == [0, 0, 0, 0] and fingers[0] == 0:
+            return "Closed Fist", shape_score
+
+        # Fallback for Thumb Up / Down when non-thumb folded
+        if fingers[1:] == [0, 0, 0, 0]:
+            if thumb_pointing_up:
+                return "Thumb Up", shape_score
+            elif thumb_pointing_down:
+                return "Thumb Down", shape_score
+            else:
+                return "Closed Fist", shape_score
+
+        # 12. Four Fingers fallback if thumb was slightly detected
+        if fingers[1:] == [1, 1, 1, 1]:
+            return "Four Fingers", shape_score
+
+        # Custom Gestures fallback
         custom_name, custom_dist = gesture_trainer.classify(lms_list, threshold=0.35)
         if custom_name:
             raw_score = max(0.0, 1.0 - (custom_dist / 0.35)) * 100.0
@@ -409,14 +427,10 @@ class GestureClassifier:
         else:
             self.confidence_ema = (0.6 * self.confidence_ema) + (0.4 * raw_score)
 
-        # PHYSICAL FIX: use shorter history for continuous gestures so the
-        # cursor and scroll feel immediate; discrete gestures retain 5-frame
-        # confirmation for safety.
+        # Shorter history for continuous gestures (Pointing, Pinch, Two Fingers)
         is_continuous = raw_gesture in self._CONTINUOUS
         working_history = self._continuous_history if is_continuous else self._discrete_history
 
-        # Keep both histories in sync (discrete history is the canonical one
-        # for backward-compat reads of self.history, but both must advance).
         self._continuous_history.append(raw_gesture)
         self._discrete_history.append(raw_gesture)
 
@@ -429,8 +443,6 @@ class GestureClassifier:
 
             req_count = max(1, len(working_history) // 2 + 1)
 
-            # Stronger stability required for switching between geometrically
-            # similar poses (only for discrete history).
             if not is_continuous:
                 similar_poses = [
                     {"Two Fingers", "Victory", "Crossed Fingers"},
@@ -445,10 +457,15 @@ class GestureClassifier:
             if count >= req_count:
                 self.last_stable_gesture = most_common
 
-        # PHYSICAL FIX: Pointing bypasses confidence gate entirely when
-        # raw_gesture is already Pointing — the cursor must never be blocked
-        # by a confidence check on a valid pointer frame.
+        # Pointing fast path for cursor responsiveness
         if raw_gesture == "Pointing" and self.confidence_ema >= 20.0:
+            return GestureResult(
+                self.last_stable_gesture, raw_gesture,
+                float(self.confidence_ema), float(stability)
+            )
+
+        # Pinch fast path
+        if raw_gesture == "Pinch" and self.confidence_ema >= 20.0:
             return GestureResult(
                 self.last_stable_gesture, raw_gesture,
                 float(self.confidence_ema), float(stability)

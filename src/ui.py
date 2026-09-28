@@ -90,7 +90,10 @@ class SmartGestureApp(ctk.CTk):
         return super().__getattr__(name)
 
     def __init__(self, close_callback=None, toggle_pause_callback=None,
-                 set_automation_callback=None, initial_automation_enabled=False):
+                 set_automation_callback=None, initial_automation_enabled=False,
+                 set_mode_callback=None, get_state_callback=None,
+                 get_latest_preview_callback=None, show_dashboard_callback=None,
+                 hide_dashboard_callback=None, quit_callback=None):
         super().__init__()
 
         self.title("SmartGestureOS")
@@ -119,6 +122,12 @@ class SmartGestureApp(ctk.CTk):
         self.close_callback = close_callback
         self.toggle_pause_callback = toggle_pause_callback
         self.set_automation_callback = set_automation_callback
+        self.set_mode_callback = set_mode_callback
+        self.get_state_callback = get_state_callback
+        self.get_latest_preview_callback = get_latest_preview_callback
+        self.show_dashboard_callback = show_dashboard_callback
+        self.hide_dashboard_callback = hide_dashboard_callback
+        self.quit_callback = quit_callback
         self.automation_enabled = bool(initial_automation_enabled)
         self._is_resuming = False
         self.hotkey_available = True
@@ -228,29 +237,26 @@ class SmartGestureApp(ctk.CTk):
             )
             btn.grid(row=0, column=i, padx=3, pady=2, sticky="ew")
 
-        # ── Compact perf stats ─────────────────────────────────────────────────
+        # ── Compact perf stats (kept initialized for headless/tests/diagnostics) ──
         self.stats_label = ctk.CTkLabel(
             self.sidebar, text="Camera: — fps  |  Detector: — fps",
             font=self._small_font, text_color=self.muted_text
         )
-        self.stats_label.grid(row=7, column=0, padx=20, pady=4, sticky="w")
-
         self.cpu_ram_label = ctk.CTkLabel(
             self.sidebar, text="CPU: —%  RAM: — MB",
             font=self._small_font, text_color=self.muted_text
         )
-        self.cpu_ram_label.grid(row=8, column=0, padx=20, pady=(0, 12), sticky="w")
 
         # ── Camera status ──────────────────────────────────────────────────────
         self.camera_state_label = ctk.CTkLabel(
             self.sidebar, text="● CAMERA ACTIVE",
             font=self._small_font, text_color=self.accent_color
         )
-        self.camera_state_label.grid(row=9, column=0, padx=20, pady=(0, 16), sticky="w")
+        self.camera_state_label.grid(row=7, column=0, padx=20, pady=(0, 16), sticky="w")
 
         # ── Action buttons in sidebar bottom ───────────────────────────────────
         btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        btn_frame.grid(row=10, column=0, padx=16, pady=4, sticky="ew")
+        btn_frame.grid(row=8, column=0, padx=16, pady=4, sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.settings_btn = ctk.CTkButton(
@@ -383,23 +389,19 @@ class SmartGestureApp(ctk.CTk):
 
     def _on_manual_mode(self, mode: str) -> None:
         """Button callback: ask backend to switch to the given mode."""
-        if self.set_automation_callback is not None:
-            # We call the callback indirectly via the mapper — this is a
-            # best-effort UI shortcut. The real mapper.set_mode() lives in the
-            # backend; expose it through the existing set_automation_callback
-            # mechanism only if the backend provides a mode-switch hook.
-            pass
-        # Attempt direct access to mapper via the root Tk parent chain
-        # (avoids adding a new callback parameter to SmartGestureApp).
-        try:
-            import main as _main_module
-            for obj in [v for v in _main_module.__dict__.values()
-                        if hasattr(v, "mapper") and hasattr(v.mapper, "set_mode")]:
-                obj.mapper.set_mode(mode)
-                return
-        except Exception:
-            pass
-        logger.info("Manual mode switch requested: %s (no backend handle available)", mode)
+        if self.set_mode_callback is not None:
+            self.set_mode_callback(mode)
+        self.set_mode_display(mode)
+
+    def set_mode_display(self, mode: str) -> None:
+        """Update mode label text and color in the UI."""
+        mode_colors = {
+            "GENERAL": "#3a7ebf",
+            "DRAW":    "#2fa572",
+            "MEDIA":   "#e38b29"
+        }
+        color = mode_colors.get(mode, "#3a7ebf")
+        self._configure_if_changed("mode", getattr(self, "mode_label", None), text=mode, text_color=color)
 
     # ── Background control mode ────────────────────────────────────────────────
 
@@ -439,10 +441,16 @@ class SmartGestureApp(ctk.CTk):
                     "enabled" if self._preview_enabled else "disabled")
 
     def request_hide(self) -> None:
-        self.set_dashboard_visible(False)
+        if self.hide_dashboard_callback is not None:
+            self.hide_dashboard_callback()
+        else:
+            self.set_dashboard_visible(False)
 
     def request_show(self) -> None:
-        self.set_dashboard_visible(True)
+        if self.show_dashboard_callback is not None:
+            self.show_dashboard_callback()
+        else:
+            self.set_dashboard_visible(True)
 
     def toggle_dashboard(self) -> None:
         self.set_dashboard_visible(not self._dashboard_visible)
@@ -607,6 +615,8 @@ class SmartGestureApp(ctk.CTk):
         if self.gesture_test_window is None or not self.gesture_test_window.winfo_exists():
             self.gesture_test_window = GestureTestUI(
                 self,
+                get_state_callback=self.get_state_callback,
+                get_preview_callback=self.get_latest_preview_callback,
                 on_close_callback=lambda: setattr(self, 'gesture_test_window', None)
             )
         else:

@@ -12,6 +12,7 @@ from src.gesture_detector import GestureDetector
 from src.gesture_classifier import GestureClassifier
 from src.gesture_mapper import GestureMapper
 from src.ui import SmartGestureApp
+from src.models import AppStateSnapshot
 from src.ui_commands import UiCommandQueue
 from src.logger import logger
 
@@ -62,6 +63,21 @@ class MainApp:
         self.fps_history = collections.deque(maxlen=30)
         self.latency_history: collections.deque = collections.deque(maxlen=30)
 
+        # Snapshot & Preview state for explicit UI providers
+        self._state_lock = threading.RLock()
+        self._preview_lock = threading.Lock()
+        self._latest_preview_frame = None
+        self._latest_preview_frame_id = -1
+        self._latest_hands_data = []
+        self._latest_raw_gesture = "Unknown"
+        self._latest_stable_gesture = "Unknown"
+        self._latest_confidence = 0
+        self._latest_action = None
+        self._detector_fps = 0.0
+        self._pointer_fps = 0.0
+        self._inference_ms = 0.0
+        self._frame_age_ms = 0.0
+
         self.ui = SmartGestureApp(
             close_callback=self.stop_system,
             toggle_pause_callback=self.toggle_automation,
@@ -71,6 +87,12 @@ class MainApp:
             # This prevents toggle_pause() from computing (not True) = False
             # before the first dashboard frame arrives (the P0 Resume bug).
             initial_automation_enabled=not start_paused,
+            set_mode_callback=self.set_mode,
+            get_state_callback=self.get_state_snapshot,
+            get_latest_preview_callback=self.get_latest_preview,
+            show_dashboard_callback=self.show_dashboard,
+            hide_dashboard_callback=self.hide_dashboard,
+            quit_callback=self.stop_system,
         )
 
         # Pipeline state
@@ -247,6 +269,66 @@ class MainApp:
         with self._automation_lock:
             current = self._automation_enabled
         self.set_automation_enabled(not current)
+
+    def set_mode(self, mode: str) -> None:
+        """Switch mode safely from any thread, releasing input and resetting temporal state."""
+        with self._automation_lock:
+            if hasattr(self, "mapper") and self.mapper:
+                self.mapper.set_mode(mode)
+            if hasattr(self, "classifier") and self.classifier:
+                self.classifier.reset()
+        if hasattr(self, "ui") and self.ui:
+            self.ui_commands.post(self.ui.set_mode_display, mode)
+
+    def get_state_snapshot(self) -> AppStateSnapshot:
+        with self._automation_lock:
+            auto_state = ("RESUMING" if getattr(self, "_rearm_state", "") == self._REARM_WAITING
+                          else "ACTIVE" if getattr(self, "_automation_enabled", False)
+                          else "PAUSED")
+            mode = self.mapper.mode if hasattr(self, "mapper") and self.mapper else "GENERAL"
+        connected = bool(getattr(self, "camera", None) and self.camera.is_connected)
+        if not connected:
+            auto_state = "CAMERA DISCONNECTED"
+        cam_fps = float(self.camera.current_fps) if hasattr(getattr(self, "camera", None), "current_fps") else (
+            float(sum(self.fps_history) / len(self.fps_history)) if getattr(self, "fps_history", None) else 0.0
+        )
+        state_lock = getattr(self, "_state_lock", None)
+        if state_lock is not None:
+            with state_lock:
+                raw_g = getattr(self, "_latest_raw_gesture", "Unknown")
+                stable_g = getattr(self, "_latest_stable_gesture", "Unknown")
+                conf = getattr(self, "_latest_confidence", 0)
+                hands_len = len(getattr(self, "_latest_hands_data", []))
+        else:
+            raw_g = getattr(self, "_latest_raw_gesture", "Unknown")
+            stable_g = getattr(self, "_latest_stable_gesture", "Unknown")
+            conf = getattr(self, "_latest_confidence", 0)
+            hands_len = len(getattr(self, "_latest_hands_data", []))
+
+        return AppStateSnapshot(
+            automation_state=auto_state,
+            mode=mode,
+            raw_gesture=raw_g,
+            stable_gesture=stable_g,
+            confidence=conf,
+            camera_connected=connected,
+            camera_fps=cam_fps,
+            detector_fps=getattr(self, "detector_fps", 0.0),
+            pointer_fps=getattr(self, "_pointer_fps", 0.0),
+            inference_ms=getattr(self, "_inference_ms", 0.0),
+            frame_age_ms=getattr(self, "_frame_age_ms", 0.0),
+            hands_detected=hands_len,
+        )
+
+    def get_latest_preview(self) -> tuple:
+        preview_lock = getattr(self, "_preview_lock", None)
+        if preview_lock is not None:
+            with preview_lock:
+                frame = self._latest_preview_frame.copy() if getattr(self, "_latest_preview_frame", None) is not None else None
+                return frame, getattr(self, "_latest_preview_frame_id", -1)
+        else:
+            frame = self._latest_preview_frame.copy() if getattr(self, "_latest_preview_frame", None) is not None else None
+            return frame, getattr(self, "_latest_preview_frame_id", -1)
 
     # ── System start ──────────────────────────────────────────────────────────
 
@@ -584,6 +666,18 @@ class MainApp:
             tracking_valid = False
             detector_times.clear()
             self.detector_fps = 0.0
+            state_lock = getattr(self, "_state_lock", None)
+            if state_lock is not None:
+                with state_lock:
+                    self._latest_hands_data = []
+                    self._latest_stable_gesture = self._latest_raw_gesture = "Unknown"
+                    self._latest_confidence = 0
+                    self._latest_action = None
+            else:
+                self._latest_hands_data = []
+                self._latest_stable_gesture = self._latest_raw_gesture = "Unknown"
+                self._latest_confidence = 0
+                self._latest_action = None
 
         def invalidate(reason):
             nonlocal observed_generation
@@ -600,6 +694,29 @@ class MainApp:
             suppress a frame it has already painted without needing access to
             this loop's locals (which it does not and must not have).
             """
+            preview_lock = getattr(self, "_preview_lock", None)
+            if preview_lock is not None:
+                with preview_lock:
+                    self._latest_preview_frame = frame
+                    self._latest_preview_frame_id = frame_id if frame_id is not None else -1
+            else:
+                self._latest_preview_frame = frame
+                self._latest_preview_frame_id = frame_id if frame_id is not None else -1
+
+            state_lock = getattr(self, "_state_lock", None)
+            if state_lock is not None:
+                with state_lock:
+                    self._latest_hands_data = list(latest_hands_data)
+                    self._latest_stable_gesture = latest_stable_gesture
+                    self._latest_raw_gesture = latest_raw_gesture
+                    self._latest_confidence = latest_confidence
+                    self._latest_action = latest_action
+            else:
+                self._latest_hands_data = list(latest_hands_data)
+                self._latest_stable_gesture = latest_stable_gesture
+                self._latest_raw_gesture = latest_raw_gesture
+                self._latest_confidence = latest_confidence
+                self._latest_action = latest_action
             avg_latency = (int(sum(self.latency_history) / len(self.latency_history))
                            if self.latency_history else 0)
             try:
@@ -675,7 +792,10 @@ class MainApp:
                             max(1, round(actual_w * scale)),
                             max(1, round(actual_h * scale)),
                         )) if scale < 1.0 else frame
+                        inf_t0 = time.perf_counter()
                         results = self.detector.process_frame(small_frame, int(now * 1000))
+                        self._inference_ms = (time.perf_counter() - inf_t0) * 1000.0
+                        self._frame_age_ms = (time.perf_counter() - capture_time) * 1000.0
                         with self._automation_lock:
                             if not self.running:
                                 break
@@ -703,6 +823,7 @@ class MainApp:
                                 self.detector_fps = (
                                     (len(detector_times) - 1) / duration if duration > 0 else 0.0
                                 )
+                                self._detector_fps = self.detector_fps
 
                     # Read visibility once per frame. `self.ui.dashboard_visible`
                     # is a plain bool on the Tk thread; reading it here is a

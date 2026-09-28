@@ -27,20 +27,11 @@ import enum
 import math
 
 # ── Gesture double-click window ─────────────────────────────────────────────
-# The previous value was a hardcoded 220 ms. That is a *mouse* double-click
-# interval, and it was measured on this machine as GetDoubleClickTime() = 200.
-# A hand gesture is much slower than a mouse button press: releasing a pinch
-# and deliberately re-pinching comfortably takes 300-500 ms. With a 220 ms
-# window the second pinch almost always arrived AFTER the window expired, so
-# the pending click committed as a single click and the second pinch started a
-# fresh one — producing "single + single" instead of a double click.
-#
-# The window is therefore derived from the Windows setting and bounded:
-# long enough for a deliberate two-pinch cycle, short enough that a later,
-# unrelated pinch is not merged into a double click.
-_GESTURE_WINDOW_SCALE = 2.0
-_GESTURE_WINDOW_MIN_MS = 300.0
-_GESTURE_WINDOW_MAX_MS = 500.0
+# Bounded window: long enough for deliberate two-pinch cycle,
+# short enough so single-click latency feels crisp.
+_GESTURE_WINDOW_SCALE = 1.2
+_GESTURE_WINDOW_MIN_MS = 250.0
+_GESTURE_WINDOW_MAX_MS = 380.0
 
 
 def windows_double_click_time_ms(default: int = 500) -> int:
@@ -49,7 +40,6 @@ def windows_double_click_time_ms(default: int = 500) -> int:
         value = int(ctypes.windll.user32.GetDoubleClickTime())
     except Exception:
         return default
-    # A nonsensical reading must not silently disable double clicking.
     return value if 100 <= value <= 2000 else default
 
 
@@ -57,6 +47,7 @@ def gesture_double_click_window_ms() -> float:
     """Gesture-appropriate double-click window in milliseconds."""
     scaled = windows_double_click_time_ms() * _GESTURE_WINDOW_SCALE
     return min(_GESTURE_WINDOW_MAX_MS, max(_GESTURE_WINDOW_MIN_MS, scaled))
+
 
 
 class EventState(enum.Enum):
@@ -229,7 +220,7 @@ class EventEngine:
                     self.mouse.mouse.move(index_x, index_y, frame_w, frame_h)
 
         elif self.state == EventState.PINCH_RELEASE_WAIT:
-            if is_pinching and can_start_action:
+            if is_pinching:
                 if now - self.pinch_release_time <= self.double_click_window_ms:
                     # Wait for the second release to distinguish a short pinch
                     # from a hold that should become a drag.

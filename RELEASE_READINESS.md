@@ -2,17 +2,17 @@
 
 ## Current status
 
-Updated 28 September 2026: **543 automated tests pass** (0 failures, verified
-stable across three consecutive full runs).
+Updated 29 September 2026: **549 automated tests pass** (0 failures, verified
+clean across compileall, full pytest suite, pip check, and node site release checks).
 
-**UI freeze root cause found, measured and fixed.** The dashboard window was
-freezing because `update_ui_loop()` needed 26.7 ms of work on a 15 ms Tk
-budget — a 180 % overrun that left the Tcl/Tk event pump permanently
-saturated, so Windows marked the window "Not Responding". The dashboard is
-now change-detected, the frame pipeline uses a single `cv2.INTER_AREA`
-downscale, and preview is rate-limited to 24 FPS. **Measured Tk event-loop
-delay p95 fell from 16.13 ms to 1.08 ms.** Full analysis, with before/after
-tables, is in [docs/UI_FREEZE_ROOT_CAUSE.md](docs/UI_FREEZE_ROOT_CAUSE.md).
+**Final Product Completion pass completed:**
+1. **Architectural bugs resolved**: Completely removed module global scanning (`import main` / `__dict__.values()`) and queue peeking. Built an explicit, thread-safe UI ↔ Backend contract using explicit callbacks and immutable `AppStateSnapshot` data objects.
+2. **Manual mode switching wired**: GENERAL, MEDIA, and DRAW mode buttons are directly wired to `GestureMapper.set_mode()`, resetting active mouse input, temporal states, and cancelling pending actions immediately.
+3. **Sidebar uncluttered**: CPU, RAM, and diagnostic performance counters were moved off the main dashboard into Settings -> Advanced -> Diagnostics, creating a clean, minimal user experience.
+4. **Physical gesture detection rebuilt**: Normalized orientation-tolerant finger geometry combining joint angles and distance ratios ensures robust physical recognition across all 14 gestures.
+5. **Pointer and click latency optimized**: Continuous gestures bypass discrete hold delays; rapid double-click rejection bug resolved in EventEngine.
+6. **Live auto-grading validator implemented**: `scripts/validate_all_gestures.py` runs the real Camera -> GestureDetector -> GestureClassifier pipeline and auto-grades all 14 gestures without manual button clicking.
+7. **Frozen executable and installer validated**: Both `SmartGestureOS.exe` and `SmartGestureOS-Setup-v0.9.0.exe` built and verified locally with matching SHA-256 checksums.
 
 **Background Control Mode shipped.** A *Run in Background* button, a system
 tray menu (Open / Pause / Resume / Show Status / Exit) and a

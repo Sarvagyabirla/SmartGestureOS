@@ -35,11 +35,13 @@ ALL_GESTURES = [
 class GestureTestUI(ctk.CTkToplevel):
     """Diagnostic gesture test window — safe to use during automation pause."""
 
-    def __init__(self, parent, on_close_callback=None):
+    def __init__(self, parent, get_state_callback=None, get_preview_callback=None, on_close_callback=None):
         super().__init__(parent)
         self.title("Gesture Test — SmartGestureOS")
         self.geometry("860x560")
         self.resizable(True, True)
+        self.get_state_callback = get_state_callback
+        self.get_preview_callback = get_preview_callback
         self.on_close_callback = on_close_callback
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -143,30 +145,26 @@ class GestureTestUI(ctk.CTkToplevel):
         self._poll()
 
     def _poll(self):
-        """Pull the latest classification from the running backend (if any)."""
+        """Pull the latest classification from explicit providers."""
         try:
-            import main as _main_module
-            app = None
-            for v in _main_module.__dict__.values():
-                if hasattr(v, "classifier") and hasattr(v, "mapper"):
-                    app = v
-                    break
+            stable = "None"
+            raw = "None"
+            conf = 0
+            frame_data = None
 
-            if app is not None:
-                # Read the latest data directly from the live classifier state
-                stable = getattr(app.classifier, "last_stable_gesture", "None") or "None"
-                raw = getattr(app.classifier, "last_raw_gesture", "None") or "None"
-                conf = int(getattr(app.classifier, "confidence_ema", 0))
-                frame_data = None
-                try:
-                    if not app.frame_queue.empty():
-                        payload = app.frame_queue.queue[0]  # peek without consuming
-                        if payload and len(payload) >= 2:
-                            frame_data = payload[0]
-                except Exception:
-                    pass
+            if self.get_state_callback is not None:
+                snap = self.get_state_callback()
+                if snap is not None:
+                    stable = getattr(snap, "stable_gesture", "None") or "None"
+                    raw = getattr(snap, "raw_gesture", "None") or "None"
+                    conf = int(getattr(snap, "confidence", 0))
 
-                self._update_status(stable, raw, conf, frame_data)
+            if self.get_preview_callback is not None:
+                preview = self.get_preview_callback()
+                if preview is not None:
+                    frame_data = preview[0] if isinstance(preview, (tuple, list)) else preview
+
+            self._update_status(stable, raw, conf, frame_data)
         except Exception:
             pass
 

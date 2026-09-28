@@ -7,9 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [Unreleased]
+## [0.9.0] — 2026-09-29
 
-### UI freeze root-cause repair and Background Control Mode — 28 September 2026
+### Final Product Completion Pass — Physical Gesture Pipeline, Fluent UI & Clean Architecture
+
+- **Eliminated Architectural Anti-Patterns**:
+  - Removed all `import main` and `__dict__.values()` module global scanning across `src/ui.py` and `src/ui_gesture_test.py`.
+  - Replaced ad-hoc discovery with an explicit, thread-safe UI ↔ Backend contract using explicit callbacks (`set_mode_callback`, `get_state_callback`, `get_latest_preview_callback`, `show_dashboard_callback`, `hide_dashboard_callback`, `quit_callback`).
+  - Added an immutable `@dataclass(frozen=True) AppStateSnapshot` for safe, decoupling telemetry and state exchange between the backend engine and UI components.
+  - Removed direct `Queue.queue[0]` inspection in `GestureTestUI`.
+
+- **Wired Manual Mode Switch Buttons**:
+  - `GENERAL`, `MEDIA`, and `DRAW` buttons now call `set_mode_callback(mode)` directly, invoking `GestureMapper.set_mode(mode)`.
+  - State transitions atomically release active mouse states, reset temporal gesture timers, cancel pending async actions, and update the UI mode label immediately.
+  - Zero dead or disconnected buttons remain on the main screen.
+
+- **Rebuilt Live Gesture Validator (`scripts/validate_all_gestures.py`)**:
+  - Replaced manual "Mark PASS/FAIL" mockup with a fully automated, real-time live grading tool.
+  - Runs the authentic production pipeline (`Camera` -> `GestureDetector` -> `GestureClassifier`) with OS action execution strictly suppressed.
+  - Auto-grades all 14 gestures based on sustained continuous recognition (350-500ms), outputting structured JSON metrics (`logs/gesture-validation-<timestamp>.json`) including median and p95 latency, confusion matrices, and confidence scores.
+
+- **Gesture Recognition Pipeline & Geometry Overhaul**:
+  - Rebuilt `fingers_up` with normalized, orientation-tolerant geometry combining MCP-PIP-DIP angles (`angle_pip`) and relative wrist-to-tip / wrist-to-MCP distances.
+  - Eliminated deadbands between parallel two-finger scroll and divergent Victory gestures while preserving noise resilience against spurious activations.
+  - Separated continuous gestures (Pointing, Pinch, Two Fingers) from discrete actions for near-instant latency and smooth cursor response.
+  - Fixed rapid second-pinch rejection in `EventEngine` so physical double-clicking functions reliably without dropping the second tap.
+
+- **Simplified Dashboard UI**:
+  - Removed engineering metrics clutter (CPU, RAM, raw FPS counters) from the main user sidebar, keeping the interface beginner-friendly and focused.
+  - Centralized advanced diagnostic and training tools in **Settings -> Advanced**.
+  - Streamlined primary controls: Live Camera Preview, high-contrast Status Badge, Mode Selector, Gesture/Confidence Badge, Settings, Background Mode, and Pause/Resume.
+
+- **Built & Verified Frozen Distribution**:
+  - Built standalone PyInstaller distribution `dist/SmartGestureOS/SmartGestureOS.exe` with verified `--self-check` and `--ui-self-check` validation.
+  - Built production Inno Setup installer `dist/release/SmartGestureOS-Setup-v0.9.0.exe` and verified matching `SHA256SUMS.txt`.
+  - Created runtime performance diagnostic `scripts/measure_runtime_performance.py` recording measured 30.8 FPS camera throughput, 27.1 FPS detector rate, 9.8 ms median inference, and 13.6 ms Tk event-loop p95 latency.
+
+---
+
+## [0.8.0] — 2026-09-28
 
 Root-cause analysis, with before/after measurements, is in
 [`docs/UI_FREEZE_ROOT_CAUSE.md`](docs/UI_FREEZE_ROOT_CAUSE.md).
