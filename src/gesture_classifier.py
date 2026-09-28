@@ -37,6 +37,8 @@ class GestureClassifier:
 
         self.history = deque(maxlen=5)  # Mode filter for jitter suppression
         self.last_stable_gesture = "None"
+        self.last_raw_gesture = "None"
+        self.is_pinching = False
 
         from src.settings_manager import settings_manager
         settings_manager.register_callback(self.on_settings_changed)
@@ -198,17 +200,13 @@ class GestureClassifier:
         hand_size = max(1e-6, np.linalg.norm(wrist - middle_mcp))
         d_pinch = np.linalg.norm(thumb_tip - index_tip)
         
-        if not hasattr(self, 'is_pinching'):
-            self.is_pinching = False
-            
         enter_thresh = getattr(self, 'pinch_enter_threshold', 0.45)
         release_thresh = getattr(self, 'pinch_release_threshold', 0.6)
         pinch_ratio = d_pinch / hand_size
         # Recorded for telemetry so a physical session shows the real geometry
         # instead of leaving "pinch did not register" unanswerable.
         self.last_pinch_ratio = float(pinch_ratio)
-        
-        pinch_ratio = d_pinch / hand_size
+
         if not self.is_pinching:
             if pinch_ratio < enter_thresh:
                 self.is_pinching = True
@@ -302,12 +300,9 @@ class GestureClassifier:
     def classify(self, hands_data) -> GestureResult:
         if not hands_data:
             self.is_pinching = False
-            
+
         raw_gesture, raw_score = self.raw_classify(hands_data)
-        
-        if not hasattr(self, 'last_raw_gesture'):
-            self.last_raw_gesture = "None"
-            
+
         if raw_gesture != self.last_raw_gesture:
             self.confidence_ema = raw_score
             self.last_raw_gesture = raw_gesture

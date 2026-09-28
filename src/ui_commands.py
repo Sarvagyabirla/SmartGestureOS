@@ -188,23 +188,3 @@ class PreviewBudget:
             "preview_duplicate": self.duplicates,
             "preview_suppressed_hidden": self.suppressed_hidden,
         }
-
-        """Discard pending commands. Used on shutdown and on hide."""
-        with self._lock:
-            count = len(self._items)
-            self._items.clear()
-        return count
-
-    @property
-    def pending(self) -> int:
-        with self._lock:
-            return len(self._items)
-
-    def as_dict(self) -> dict:
-        return {
-            "posted": self.posted,
-            "executed": self.executed,
-            "dropped": self.dropped,
-            "failed": self.failed,
-            "pending": self.pending,
-        }
