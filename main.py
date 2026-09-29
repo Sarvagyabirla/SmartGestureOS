@@ -419,10 +419,12 @@ class MainApp:
         try:
             from src.paths import RESOURCE_DIR
             candidates.append(RESOURCE_DIR / "packaging" / "windows" / "SmartGestureOS.ico")
+            candidates.append(RESOURCE_DIR / "SmartGestureOS.ico")
         except Exception:
             pass
-        candidates.append(Path(__file__).resolve().parent
-                           / "packaging" / "windows" / "SmartGestureOS.ico")
+        root_dir = Path(__file__).resolve().parent
+        candidates.append(root_dir / "packaging" / "windows" / "SmartGestureOS.ico")
+        candidates.append(root_dir / "SmartGestureOS.ico")
         for candidate in candidates:
             try:
                 if candidate.exists():
@@ -1049,14 +1051,14 @@ class MainApp:
                     logger.debug(
                         "Preview: camera=%s hands=%d landmarks=%d index_tip=%s "
                         "raw=%s stable=%s fps=%d input_ms=%d inference_ms=%.1f "
-                        "pointer_fps=%.1f capture_to_pointer_ms=%.1f "
+                        "pointer_fps=%.1f capture_to_pointer_ms=%s "
                         "pointer_samples=%d pointer_suppressed=%d automation=%s "
                         "dashboard=%s",
                         camera_on, len(hands_data), len(landmarks), tip,
                         raw_gesture, stable_gesture, fps, avg_latency,
                         self.detector.average_inference_latency,
                         pointer.get("pointer_fps", 0.0),
-                        pointer.get("capture_to_pointer_ms", 0.0),
+                        (f"{c2p:.1f}" if (c2p := pointer.get("capture_to_pointer_ms")) is not None else "None"),
                         pointer.get("pointer_samples", 0),
                         pointer.get("pointer_suppressed", 0),
                         automation_enabled,

@@ -386,6 +386,7 @@ def test_pointer_metrics_as_dict_exposes_every_reported_field(clock):
         "pointer_samples",
         "pointer_suppressed",
         "capture_to_pointer_ms",
+        "capture_to_pointer_p95_ms",
         "inference_median_ms",
         "inference_mean_ms",
     }

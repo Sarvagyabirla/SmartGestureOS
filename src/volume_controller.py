@@ -42,6 +42,14 @@ class VolumeController:
         """Attempt to re-acquire audio endpoint after a failure."""
         try:
             import comtypes
+            import comtypes.client
+            from src.paths import get_user_data_dir
+            try:
+                gen_dir = get_user_data_dir() / "comtypes_gen"
+                gen_dir.mkdir(parents=True, exist_ok=True)
+                comtypes.client.gen_dir = str(gen_dir)
+            except Exception:
+                pass
             from pycaw.pycaw import AudioUtilities
 
             if self._com_thread is None:

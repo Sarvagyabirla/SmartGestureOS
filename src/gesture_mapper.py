@@ -86,6 +86,13 @@ _DEFAULT_ACTION_POLICY = {
     "repeatable": False,
 }
 
+_ADJACENT_CONFUSION_PAIRS = frozenset({
+    ("Four Fingers", "Open Palm"),
+    ("Open Palm", "Four Fingers"),
+    ("Two Fingers", "Victory"),
+    ("Victory", "Two Fingers"),
+})
+
 def _get_action_policy(action_name: str) -> dict:
     return _ACTION_POLICY.get(action_name, _DEFAULT_ACTION_POLICY)
 
@@ -149,18 +156,20 @@ class GestureIntentGate:
         action_name: str | None = None,
         now: float | None = None,
         dropout_grace: float | None = None,
+        is_adjacent_grace: bool = False,
     ) -> bool:
         if now is None:
             now = time.perf_counter()
         effective_dur = self.duration if duration is None else float(duration)
         effective_grace = self.dropout_grace if dropout_grace is None else float(dropout_grace)
 
-        # 1. Explicit conflicting raw gesture cancellation (§18)
+        # 1. Explicit conflicting raw gesture cancellation (§18, P0)
         if (
             self.target_gesture is not None
             and raw_gesture is not None
             and raw_gesture not in (None, "None", "Unknown", "")
             and raw_gesture != self.target_gesture
+            and not is_adjacent_grace
         ):
             self.reset()
             return False
@@ -326,6 +335,7 @@ class GestureMapper:
         self.timer.reset()
         self.sleep_timer.reset()
         self.last_pinch_time = 0.0
+        self._adjacent_conflict_count = 0
         self.brightness_gesture_active = False
         self.last_brightness_y = None
         self._mode_switch_gesture = None
@@ -492,13 +502,27 @@ class GestureMapper:
         raw_is_explicit = raw_gesture not in (None, "None", "Unknown", "")
 
         conflicting_raw = False
+        is_adjacent_grace = False
         if raw_is_explicit:
-            if known_stable and raw_gesture != gesture:
-                conflicting_raw = True
-            elif not known_stable and target is not None and raw_gesture != target:
-                conflicting_raw = True
+            active_target = gesture if known_stable else target
+            if active_target is not None and raw_gesture != active_target:
+                is_adjacent_pair = (active_target, raw_gesture) in _ADJACENT_CONFUSION_PAIRS
+                # Weak/ambiguous adjacent confusion allows 1-2 frames of grace (§26 & §27)
+                if is_adjacent_pair and confidence < 60.0:
+                    self._adjacent_conflict_count = getattr(self, "_adjacent_conflict_count", 0) + 1
+                    if self._adjacent_conflict_count <= 2:
+                        is_adjacent_grace = True
+                    else:
+                        conflicting_raw = True
+                else:
+                    self._adjacent_conflict_count = 0
+                    conflicting_raw = True
+            else:
+                self._adjacent_conflict_count = 0
+        else:
+            self._adjacent_conflict_count = 0
 
-        gesture_confirmed = known_stable and not mode_switch_held and not conflicting_raw
+        gesture_confirmed = (known_stable or is_adjacent_grace) and not mode_switch_held and not conflicting_raw
 
 
         # ── Sleep / wake ──────────────────────────────────────────────────────
@@ -590,6 +614,7 @@ class GestureMapper:
                 duration=hold_dur,
                 dropout_grace=dropout_grace,
                 action_name=mapped_action,
+                is_adjacent_grace=is_adjacent_grace,
             ):
                 previous_mode = self.mode
                 action = self.execute_action(mapped_action)

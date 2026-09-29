@@ -7,41 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [0.9.1] — 2026-09-29
+## [0.9.1] — 2026-09-30
 
-### Final Human-Interaction Quality Pass — Fluent Interaction, Immediate Clicks & Release Hardening
+### Ultimate Final Engineering & Release-Readiness Pass — Physical Reliability, Temporal Intent, Packaging & CI
 
-- **Canonical Configuration & Zero-Drift Settings Architecture**:
-  - Unified configuration across `config/defaults.json`, `profiles/default.json`, `_SAFE_DEFAULTS`, `MouseController`, `GestureClassifier`, and `PointerIntent`.
-  - Added safe runtime profile migration (`_migrate_profile_data`) that automatically upgrades legacy factory defaults (confidence threshold 50.0 -> 35.0, two-finger spacing 0.2 -> 0.22, victory spacing 0.35 -> 0.30) without modifying custom user mappings or camera preferences.
-  - Added `reset_control_settings_to_recommended()` to `SettingsManager`.
-  - Added automated regression tests to guarantee zero future configuration drift.
+- **Four Fingers / Open Palm Hysteresis & Thumb Temporal Filter**:
+  - Implemented a 3-frame median temporal filter (`self._thumb_score_history`) on thumb extension scores to filter high-frequency sensor noise.
+  - Introduced asymmetric hysteresis thresholds (`0.24` for Four Fingers, `0.38` for Open Palm) with positive folded-thumb score contributions for Four Fingers, completely eliminating classification flickering during screenshot hold gestures.
 
-- **Immediate Single-Click & Native Windows Double-Click Redesign**:
-  - Eliminated artificial single-click deferral window in `EventEngine`. Short pinch releases immediately emit a left click (down + up).
-  - A second short pinch release within the double-click window naturally emits another immediate left click, allowing Windows to handle native double-click timing without synthetic 3-click errors or double-click lag.
-  - Implemented Click Anchor on Pinch onset: cursor position is anchored the instant pinch begins, eliminating click target drift as thumb approaches index.
+- **Natural Curled-Hand Pinch & Anti-Fist Guard**:
+  - Replaced the brittle palm-distance guard with knuckle-relative geometry (`d_pinch_wrist`), allowing natural curled-finger pinches while maintaining strict rejection of closed fists.
 
-- **Drag Continuity & Seamless Transition**:
-  - Preserved One-Euro filter state on pinch start and seeded smoother directly from click anchor upon drag transition, eliminating first-frame cursor snaps.
-  - Implemented adaptive drag intent: drag initiates immediately upon 16px motion after 120ms, or after standard hold duration without motion.
-  - Added safe failsafe drop on raw release before stable classifier catches up.
+- **Continuous Two Fingers vs. Victory Discriminant**:
+  - Eliminated the 0.22–0.30 dead-band between Two Fingers and Victory.
+  - Implemented continuous scoring using tip spacing, divergence angle (>= 16°), and tip/MCP divergence ratios (>= 1.35) with hysteresis bound to `last_stable_gesture`.
 
-- **Confidence-Aware Pointer Intent & Exit Policy**:
-  - Immediate single-frame pointer activation when raw Pointing geometric confidence >= 60%; 2-frame guarded entry for moderate confidence.
-  - Immediate exit on real hand loss (`NO_HAND_RAW`), bounded 100ms grace only for transient classifier uncertainty (`UNKNOWN_RAW`).
-  - Added soft-edge coordinate mapping using `tanh` near ROI margins for comfortable screen corner reachability without edge lock or abrupt jumps.
+- **Relaxed Rock On & Call Me Disambiguation**:
+  - Relaxed strict thumb extension requirement for natural Rock On hand poses.
+  - Enforced folded index finger geometry to distinctly separate Call Me from Rock On.
 
-- **Scroll Refinements & Bounded Velocity**:
-  - Added natural deadzone filtering to avoid jitter on initial gesture formation.
-  - Velocity-sensitive scaling with bounded max 3 ticks per frame to prevent runaway scroll acceleration.
+- **Target-Aware Temporal Intent Gate & Action Hold Recovery**:
+  - Replaced brittle 1-frame hold resets with target-aware conflict handling:
+    - Bounded dropout grace (100–150 ms) for `Unknown`/noisy frames.
+    - Adjacent confusion grace (1–2 frames) for Four Fingers ↔ Open Palm transitions.
+    - Immediate reset on strong, explicit conflicting gestures.
+  - Implemented strict release gating across all single-shot actions (Screenshot, VS Code, Chrome, Task View, Show Desktop, Lock PC, Mode Switch, Save Drawing, Clear Canvas, Right Click).
 
-- **Discrete Action Hold Times & Right-Click Release Gate**:
-  - Discrete right-click on Three Fingers with release gating to prevent continuous repeats while held.
-  - Differentiated action hold times: volume actions respond with 200ms initial confirmation, while discrete high-impact actions maintain deliberate 300ms confirmation.
+- **Double-Click Candidate Anchor Lock**:
+  - Cursor movement within 28 px of the initial click anchor is suppressed during the `PINCH_RELEASE_WAIT` window, ensuring the second click lands strictly within native Windows `SM_CXDOUBLECLK` spatial tolerance (4 px).
 
-- **Master Interaction Benchmark (`scripts/validate_interaction_quality.py`)**:
-  - Built comprehensive benchmark suite covering 9-target pointer acquisition, rest jitter, fast movement lag, click latency/drift, double click intervals, drag continuity, scroll bounds, and transition matrix. All gates passing (100% Core Passing).
+- **Drag Continuity & Dropout Grace**:
+  - Added 120 ms grace period across transient classifier uncertainty while dragging.
+  - Coordinates track the thumb-index midpoint for smoother drag motion and zero first-frame snap.
+
+- **Time-Normalized Scroll**:
+  - Scroll tracking averages index and middle fingertip Y coordinates when extended together, with stationary decay and frame-rate-independent velocity scaling.
+
+- **Profile Schema v2 & Robust In-Memory Migration**:
+  - Introduced `"profile_schema_version": 2` across configuration schemas.
+  - Fixed migration sequence: raw profile data is migrated in memory, deep-merged with factory defaults, validated, and only then atomically written to disk.
+  - Automatically migrates legacy factory default sensitivity (0.70 -> 0.75) while preserving custom user values.
+
+- **Audio COM Cache Redirection & Frozen Packaging**:
+  - Redirected `comtypes.client.gen_dir` to `%LOCALAPPDATA%\SmartGestureOS\comtypes_gen` to avoid `PermissionError` when running from read-only directories like `Program Files`.
+  - Added `SmartGestureOS.ico` to PyInstaller `datas` and fixed frozen runtime resolution in `_tray_icon_path()`.
+  - Built official Inno Setup 6.7.3 installer (`SmartGestureOS-Setup-v0.9.1.exe`, 31.8 MB, SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822`).
+
+- **Automated Test Suite**:
+  - Added `tests/test_final_mission_regressions.py` covering all 21 mission requirements.
+  - All 587 tests passing in 12.5s.
+
 
 ---
 

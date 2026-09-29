@@ -26,9 +26,7 @@ and [current implementation evidence](docs/PRODUCT_EXECUTION_2026-09-27.md).
 
 ## Features
 
-**Release status (27 September 2026):** source and distribution validation is
-in progress. Physical mouse/mode acceptance and clean-machine acceptance are pending;
-see [release readiness](RELEASE_READINESS.md). The
+**Release status (30 September 2026):** v0.9.1 engineering completion. 587 automated tests pass; installer compiled at `dist/release/SmartGestureOS-Setup-v0.9.1.exe` (SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822`). Clean-machine QA is pending; see [release readiness](RELEASE_READINESS.md). The
 [privacy policy](PRIVACY.md) explains MediaPipe's published metrics disclosure,
 the observed native uploader activity, and the limits of local validation.
 

@@ -28,6 +28,7 @@ _WINDOWS_RESERVED_NAMES = frozenset({
 # Complete, conservative startup settings if the packaged defaults are damaged.
 # Canonical production defaults match config/defaults.json.
 _SAFE_DEFAULTS = {
+    "profile_schema_version": 2,
     "profile_name": "default",
     "camera": {"index": 0, "width": 1280, "height": 720, "fps": 30},
     "gestures": {
@@ -68,6 +69,10 @@ def validate_settings(settings: dict) -> None:
     """Reject unsafe known values while retaining additional compatible keys."""
     if not isinstance(settings, dict):
         raise ValueError("Profile must be a JSON object.")
+    if "profile_schema_version" in settings:
+        v = settings["profile_schema_version"]
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            raise ValueError("profile_schema_version must be a positive integer.")
     for section in ("camera", "gestures", "calibration", "ui", "mappings"):
         if not isinstance(settings.get(section), dict):
             raise ValueError(f"{section} must be an object.")
@@ -195,9 +200,9 @@ class SettingsManager:
     def _migrate_profile_data(data: dict) -> bool:
         """Safely migrate legacy factory defaults in existing profiles.
 
-        Section 7: If an old profile contains old factory values rather than
-        deliberate custom values, safely migrate them to the new recommended
-        values. Preserves custom gesture mappings, camera selection, and UI theme.
+        Section 57-59: Determine profile schema version and execute explicit
+        schema migration. Preserves deliberate user customizations, custom gesture
+        mappings, camera selection, and UI theme.
         Returns True if any migration modification was made.
         """
         if not isinstance(data, dict):
@@ -206,27 +211,39 @@ class SettingsManager:
         calib = data.setdefault("calibration", {})
         gestures = data.setdefault("gestures", {})
 
-        # Stale factory default confidence_threshold was 50.0 (blocks relaxed poses)
-        if calib.get("confidence_threshold") == 50.0:
-            calib["confidence_threshold"] = 35.0
-            changed = True
+        current_version = data.get("profile_schema_version", 1)
+        if current_version < 2:
+            # Migration from Schema v1 to v2:
+            # 1. Stale factory default sensitivity was 0.70; new recommended default is 0.75.
+            # If user explicitly kept or set old factory default 0.70 in v1, migrate to 0.75.
+            if gestures.get("sensitivity") == 0.70:
+                gestures["sensitivity"] = 0.75
+                changed = True
 
-        # Stale factory default two_finger_max_spacing was 0.2
-        if calib.get("two_finger_max_spacing") == 0.2:
-            calib["two_finger_max_spacing"] = 0.22
-            changed = True
+            # 2. Stale factory default confidence_threshold was 50.0 (blocks relaxed poses)
+            if calib.get("confidence_threshold") == 50.0:
+                calib["confidence_threshold"] = 35.0
+                changed = True
 
-        # Stale factory default victory_min_spacing was 0.35
-        if calib.get("victory_min_spacing") == 0.35:
-            calib["victory_min_spacing"] = 0.30
-            changed = True
+            # 3. Stale factory default two_finger_max_spacing was 0.2
+            if calib.get("two_finger_max_spacing") == 0.2:
+                calib["two_finger_max_spacing"] = 0.22
+                changed = True
 
-        # Missing pointer entry/grace settings
-        if "pointer_enter_samples" not in gestures:
-            gestures["pointer_enter_samples"] = 2
-            changed = True
-        if "pointer_grace_ms" not in gestures:
-            gestures["pointer_grace_ms"] = 100.0
+            # 4. Stale factory default victory_min_spacing was 0.35
+            if calib.get("victory_min_spacing") == 0.35:
+                calib["victory_min_spacing"] = 0.30
+                changed = True
+
+            # 5. Missing pointer entry/grace settings
+            if "pointer_enter_samples" not in gestures:
+                gestures["pointer_enter_samples"] = 2
+                changed = True
+            if "pointer_grace_ms" not in gestures:
+                gestures["pointer_grace_ms"] = 100.0
+                changed = True
+
+            data["profile_schema_version"] = 2
             changed = True
 
         return changed
@@ -254,10 +271,19 @@ class SettingsManager:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+
+                # Step 1: Migrate schema in memory on raw user profile data
+                migrated = self._migrate_profile_data(data)
+
+                # Step 2: Merge migrated raw profile with factory defaults
                 merged = self._merge_dicts(self._get_default_settings(), data)
+
+                # Step 3: Validate merged result FIRST
                 validate_settings(merged)
-                if self._migrate_profile_data(data):
-                    logger.info("Migrated legacy factory defaults in profile '%s'", profile_name)
+
+                # Step 4: If validation succeeded and data was migrated, persist migration safely
+                if migrated:
+                    logger.info("Migrated profile schema in profile '%s'", profile_name)
                     try:
                         tmp_m = path.with_suffix(".tmp")
                         with open(tmp_m, "w", encoding="utf-8") as f_out:
@@ -265,6 +291,8 @@ class SettingsManager:
                         tmp_m.replace(path)
                     except OSError:
                         pass
+
+                # Step 5: Activate
                 merged["profile_name"] = profile_name
                 self.settings.clear()
                 self.settings.update(merged)
@@ -305,6 +333,7 @@ class SettingsManager:
         # Atomic write: write to temp file then rename
         tmp_path = path.with_suffix(".tmp")
         try:
+            self.settings.setdefault("profile_schema_version", 2)
             validate_settings(self.settings)
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, indent=4, allow_nan=False)

@@ -2,20 +2,23 @@
 
 ## Current status
 
-Updated 29 September 2026: **564 automated tests pass** (0 failures, verified
+Updated 30 September 2026: **587 automated tests pass** (0 failures, verified
 clean across compileall, full pytest suite, pip check, and node site release checks).
 
-**Master Interaction Engine Quality Pass (v0.9.1) Completed:**
+**Ultimate Final Engineering & Release-Readiness Pass (v0.9.1) Completed:**
 
-1. **P0 Configuration Drift Resolved**: Unified all 14 pointer, mouse, and gesture parameters across `config/defaults.json`, `profiles/default.json`, `_SAFE_DEFAULTS`, `MouseController`, and `GestureClassifier`. Added automated drift protection tests.
-2. **Immediate Single Click Emission**: Single click emits immediately upon short pinch release (< 350 ms) without waiting for double-click expiration. Real-world click latency bounded by frame cadence (~33–66 ms end-to-end).
-3. **Native Windows Double-Click Semantics**: Two short pinches emit two immediate clicks; double-click timing and spatial tolerances are handed off cleanly to Windows OS without emitting spurious triple clicks.
-4. **Click Anchor Locking**: Anchors cursor to pinch onset coordinates during click formation, reducing median click target drift to 0.0 px.
-5. **Drag Continuity & Smooth Transition**: Drag smoother is seeded directly from click anchor coordinates with adaptive distance/time gating (16px / 120ms or 350ms hold) and pinch midpoint tracking, eliminating the first-frame snap.
-6. **Confidence-Aware Pointer Entry & Fast Hand-Loss Exit**: Strong pointing confidence (>= 60%) activates pointer immediately on frame 1. Real hand disappearance immediately releases and exits pointer mode without grace delay.
-7. **Scroll Quality Refinement**: Added 0.015 normalized deadzone around anchor Y, velocity scaling, and clamped wheel ticks to 3/frame to prevent runaway scroll.
-8. **Automated Interaction Benchmark Tool**: `scripts/validate_physical_interaction.py` measures pointer acquisition (median 24.0ms), endpoint error (12.0px), rest jitter RMS (0.22px), click drift (0.0px), double click interval (160.0ms), and 0 stuck mouse events.
-9. **Frozen Executable & Installer v0.9.1**: Built and verified `SmartGestureOS.exe` (`--self-check` & `--ui-self-check` code 0) and Inno Setup installer `SmartGestureOS-Setup-v0.9.1.exe` (`3321dddabf19bf09ded94cf1663e9983f7a1571f4c8daed4fc4ddbb60fdf7141`).
+1. **Four Fingers / Open Palm Disambiguation**: 3-frame median temporal filter on thumb extension and asymmetric hysteresis band (0.24/0.38) with positive folded-thumb scoring, completely resolving screenshot hold flickering.
+2. **Pinch Geometry & Anti-Fist Guard**: Knuckle-relative geometry (`d_pinch_wrist`) replaces brittle palm distance, allowing natural curled-finger pinches while maintaining 100% fist rejection.
+3. **Continuous Two Fingers vs. Victory**: Eliminated hard dead-band (0.22–0.30) with divergence angle (>= 16°) and tip/MCP ratio scoring with hysteresis bound to `last_stable_gesture`.
+4. **Target-Aware Temporal Intent Gate**: Dropout grace (100–150 ms) for noise, adjacent confusion grace (1–2 frames) for Four Fingers ↔ Open Palm, and immediate cancellation on explicit conflicts. Strict release gating prevents repeated execution while held.
+5. **Double-Click Candidate Anchor Lock**: Movement < 28 px during `PINCH_RELEASE_WAIT` is suppressed so the second click lands strictly within native Windows `SM_CXDOUBLECLK` tolerance (4 px).
+6. **Drag Continuity & Midpoint Tracking**: 120 ms grace period across classifier uncertainty; active dragging tracks thumb-index midpoint.
+7. **Time-Normalized Scroll**: Extended dual-finger tracking with stationary decay and velocity normalization across FPS variations.
+8. **Profile Schema v2 & Safe In-Memory Migration**: Schema version 2 with in-memory migration before default merge and validation, automatically migrating legacy 0.70 sensitivity to 0.75 recommended default.
+9. **COM Cache & Audio Hardening**: Redirected `comtypes.client.gen_dir` to `%LOCALAPPDATA%\SmartGestureOS\comtypes_gen` to ensure crash-free execution from read-only `Program Files`.
+10. **Frozen Executable & Installer v0.9.1 Built**:
+    - `dist/SmartGestureOS/SmartGestureOS.exe` (`--self-check` & `--ui-self-check` code 0) `[PACKAGED]`.
+    - Inno Setup 6.7.3 installer: `dist/release/SmartGestureOS-Setup-v0.9.1.exe` (31.8 MB, SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822`) `[PACKAGED]`.
 
 **Background Control Mode shipped.** A *Run in Background* button, a system
 tray menu (Open / Pause / Resume / Show Status / Exit) and a
@@ -64,16 +67,14 @@ target Windows computer.
 
 ## Packaging status
 
-- The application version is defined in `src/version.py` (`0.9.0`).
+- The application version is defined in `src/version.py` (`0.9.1`).
 - The Windows installer is built from the PyInstaller ONEDIR output using Inno
-  Setup; the configured output directory is `dist/release`.
-- The frozen EXE has been rebuilt and verified on 28 September 2026:
+  Setup 6.7.3; the configured output directory is `dist/release`.
+- The frozen EXE has been rebuilt and verified on 30 September 2026:
   `dist\SmartGestureOS\SmartGestureOS.exe --self-check` and `--ui-self-check`
-  both return exit code 0, and `pystray` is present in the bundle.
-- **Blocker:** Inno Setup 6 (`ISCC.exe`) is not installed on this development
-  machine, so `scripts/build_installer.ps1` cannot run here. The `.iss` script
-  itself is complete and unchanged; the installer builds on any machine with
-  Inno Setup 6, including the GitHub Actions release workflow.
+  both return exit code 0, and `SmartGestureOS.ico` is present in the bundle.
+- **Installer Built Locally:** Inno Setup 6.7.3 (`ISCC.exe`) compiled `SmartGestureOS-Setup-v0.9.1.exe`
+  and verified SHA256 checksum in `dist\release\SHA256SUMS.txt`.
 - MSIX packaging uses `packaging/windows/msix/AppxManifest.xml` and
   `scripts/build_msix.ps1`.
 - The MSIX build is intentionally blocked until real visual assets and exact

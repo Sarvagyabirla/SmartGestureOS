@@ -51,6 +51,8 @@ a = Analysis(
         # Core runtime resources
         (str(ROOT / 'models'), 'models'),
         (str(ROOT / 'config'), 'config'),
+        (str(ROOT / 'packaging' / 'windows' / 'SmartGestureOS.ico'), 'packaging/windows'),
+        (str(ROOT / 'packaging' / 'windows' / 'SmartGestureOS.ico'), '.'),
         # CustomTkinter assets
         *ctk_datas,
         *mediapipe_datas,

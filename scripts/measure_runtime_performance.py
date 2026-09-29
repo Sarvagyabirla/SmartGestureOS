@@ -127,11 +127,13 @@ def measure_runtime(seconds: float = 10.0, output_path: Path = None, mock: bool 
     ram_end = get_process_rss()
 
     inf_samples = list(getattr(app.detector, "_latency_samples", []))
-    inf_median = pct(inf_samples, 0.50)
-    inf_p95 = pct(inf_samples, 0.95)
+    inf_median = pct(inf_samples, 0.50) if inf_samples else None
+    inf_p95 = pct(inf_samples, 0.95) if inf_samples else None
 
     pointer = app._pointer_metrics_snapshot() if hasattr(app, "_pointer_metrics_snapshot") else {}
-    c2p = pointer.get("capture_to_pointer_ms", 0.0)
+    c2p_raw = pointer.get("capture_to_pointer_ms")
+    c2p_p95_raw = pointer.get("capture_to_pointer_p95_ms")
+    has_pointer_events = pointer.get("pointer_samples", 0) > 0 and c2p_raw is not None
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -140,10 +142,10 @@ def measure_runtime(seconds: float = 10.0, output_path: Path = None, mock: bool 
         "detector_fps": round(statistics.fmean(detector_samples) if detector_samples else 0.0, 1),
         "pointer_fps": round(float(pointer.get("pointer_fps", 0.0)), 1),
         "preview_fps": round(float(app.ui.frames_rendered / seconds if seconds > 0 else 0.0), 1),
-        "inference_median_ms": round(inf_median, 1),
-        "inference_p95_ms": round(inf_p95, 1),
-        "capture_to_pointer_median_ms": round(c2p, 1),
-        "capture_to_pointer_p95_ms": round(c2p * 1.3, 1),
+        "inference_median_ms": round(inf_median, 1) if inf_median is not None else None,
+        "inference_p95_ms": round(inf_p95, 1) if inf_p95 is not None else None,
+        "capture_to_pointer_median_ms": round(c2p_raw, 1) if has_pointer_events else None,
+        "capture_to_pointer_p95_ms": round(c2p_p95_raw, 1) if has_pointer_events and c2p_p95_raw is not None else None,
         "tk_loop_p95_ms": round(pct(list(loop_delays), 0.95), 1),
         "cpu_average": round(statistics.fmean(cpu_samples) if cpu_samples else 0.0, 1),
         "cpu_peak": round(max(cpu_samples) if cpu_samples else 0.0, 1),

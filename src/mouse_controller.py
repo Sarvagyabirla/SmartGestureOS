@@ -217,6 +217,31 @@ class MouseController:
                 self.mouse.reset_pointer_filter()
             return False
 
+        # Double-click candidate anchor lock (Section 34-36):
+        # During the double-click candidate window (PINCH_RELEASE_WAIT),
+        # prevent small hand tremor/re-positioning from drifting the cursor
+        # away from where click #1 landed.
+        if hasattr(self, "engine") and getattr(self.engine, "state", None) is not None:
+            from .event_engine import EventState
+            if self.engine.state == EventState.PINCH_RELEASE_WAIT:
+                anchor = getattr(self.engine, "click_anchor", None)
+                if anchor is not None:
+                    mapped = getattr(self.mouse, "map_coordinates", None)
+                    if callable(mapped):
+                        try:
+                            res = mapped(index_x, index_y, frame_w, frame_h)
+                            target_x, target_y = res if isinstance(res, (tuple, list)) and len(res) == 2 else (None, None)
+                        except Exception:
+                            target_x, target_y = None, None
+                        if target_x is not None and target_y is not None:
+                            dist = math.hypot(target_x - anchor[0], target_y - anchor[1])
+                            if dist < 28.0:
+                                self.mouse.last_pos = (int(anchor[0]), int(anchor[1]))
+                                self.pointer_metrics.record_suppressed()
+                                return False
+                            else:
+                                self.engine._change_state(EventState.HOVER, now=now)
+
         moved = bool(self.mouse.move(index_x, index_y, frame_w, frame_h))
         if moved:
             self.pointer_metrics.record_update(capture_at)

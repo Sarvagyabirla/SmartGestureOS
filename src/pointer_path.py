@@ -246,6 +246,17 @@ class LatencyMeter:
         self._samples.clear()
 
     @property
+    def samples(self) -> list[float]:
+        return list(self._samples)
+
+    def percentile_ms(self, q: float) -> float | None:
+        if not self._samples:
+            return None
+        ordered = sorted(self._samples)
+        idx = min(len(ordered) - 1, max(0, int(len(ordered) * q)))
+        return ordered[idx]
+
+    @property
     def count(self) -> int:
         return len(self._samples)
 
@@ -306,11 +317,13 @@ class PointerMetrics:
         return self.updates.fps
 
     def as_dict(self) -> dict:
+        has_samples = self.capture_to_pointer.count > 0
         return {
             "pointer_fps": self.pointer_fps,
             "pointer_samples": self.samples,
             "pointer_suppressed": self.suppressed,
-            "capture_to_pointer_ms": self.capture_to_pointer.median_ms,
-            "inference_median_ms": self.inference.median_ms,
-            "inference_mean_ms": self.inference.mean_ms,
+            "capture_to_pointer_ms": self.capture_to_pointer.median_ms if has_samples else None,
+            "capture_to_pointer_p95_ms": self.capture_to_pointer.percentile_ms(0.95) if has_samples else None,
+            "inference_median_ms": self.inference.median_ms if self.inference.count > 0 else None,
+            "inference_mean_ms": self.inference.mean_ms if self.inference.count > 0 else None,
         }

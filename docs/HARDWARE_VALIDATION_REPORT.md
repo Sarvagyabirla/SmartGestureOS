@@ -9,6 +9,7 @@ The v0.9.1 pass focused on physical human-interaction quality, latency minimizat
 ### Evidence Classification & Methodology Audit
 
 All measurements are strictly partitioned into evidence tiers to eliminate ambiguous or synthetic-presented-as-physical claims:
+
 - `[AUTO]`: Automated unit, integration, and state machine tests executed in Python/pytest.
 - `[SYNTHETIC]`: Programmatically generated landmark traces and synthetic sensor simulations.
 - `[LIVE]`: Real webcam frames with live MediaPipe HandLandmarker inference.
@@ -33,16 +34,17 @@ All measurements are strictly partitioned into evidence tiers to eliminate ambig
 - **Core Acceptance Gates Passed**: **YES** `[MEASURED][AUTO]`
 
 ### Latency Timing Clocks (`time.perf_counter`)
+
 - End-to-end capture-to-pointer latency is defined truthfully as:
   `T_CAPTURE -> T_FRAME_RECEIVED -> T_INFERENCE_START -> T_INFERENCE_END -> T_POINTER_COMMAND`
 - End-to-end latency budget: Median **45–65 ms**, p95 **85–110 ms** (under 30 FPS camera + 25 FPS MediaPipe). Zero 0.0 ms impossible latencies permitted.
 
 ### Automated Test Suite
 
-- `pytest tests/`: **564 passed in 9.68s** (0 failures, 1 deprecation warning in CTk display scaling).
-- Regression suite `tests/test_interaction_engine_quality.py`: **15/15 passed**.
+- `pytest tests/`: **587 passed in 12.50s** (0 failures, 1 deprecation warning in CTk display scaling).
+- Regression suite `tests/test_final_mission_regressions.py`: **21/21 passed**.
 - Frozen Executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` & `--ui-self-check` passed with code 0 `[PACKAGED]`.
-- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): SHA-256 `3321dddabf19bf09ded94cf1663e9983f7a1571f4c8daed4fc4ddbb60fdf7141` `[PACKAGED]`.
+- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822` `[PACKAGED]`.
 
 ---
 

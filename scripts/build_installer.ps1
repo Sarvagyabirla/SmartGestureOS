@@ -28,8 +28,8 @@ if (-not (Test-Path $exe)) { throw "PyInstaller output is missing. Run scripts\b
 
 Push-Location -LiteralPath $repoRoot
 try {
-    & $IsccPath "/DAppVersion=$version" "packaging\windows\SmartGestureOS.iss"
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+    $proc = Start-Process -FilePath $IsccPath -ArgumentList "/Qp", "/DAppVersion=$version", "packaging\windows\SmartGestureOS.iss" -Wait -NoNewWindow -PassThru
+    if ($proc.ExitCode -ne 0) { throw "Inno Setup failed with exit code $($proc.ExitCode)" }
 } finally {
     Pop-Location
 }

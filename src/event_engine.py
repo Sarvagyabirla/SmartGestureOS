@@ -54,14 +54,26 @@ def gesture_double_click_window_ms() -> float:
 def _extract_scroll_y(lms_list) -> float | None:
     """Extract normalized Y for vertical scroll tracking.
     
-    Uses validated index tip (8) normalized Y coordinate.
+    Uses mean of index tip (8) and middle tip (12) when tracking together
+    in an extended Two Fingers pose (y12 < y10 and abs(y8 - y12) < 0.08),
+    falling back to index tip.
     """
     if not lms_list or len(lms_list) < 9:
         return None
     y8 = getattr(lms_list[8], "y", None)
-    if isinstance(y8, (int, float)) and math.isfinite(y8) and (0.0 <= y8 <= 1.0):
-        return float(y8)
-    return None
+    if not (isinstance(y8, (int, float)) and math.isfinite(y8) and 0.0 <= y8 <= 1.0):
+        return None
+    if len(lms_list) >= 13:
+        y12 = getattr(lms_list[12], "y", None)
+        y10 = getattr(lms_list[10], "y", None)
+        if (
+            isinstance(y12, (int, float)) and math.isfinite(y12) and 0.0 <= y12 <= 1.0
+            and isinstance(y10, (int, float)) and math.isfinite(y10)
+            and y12 < y10
+            and abs(y8 - y12) < 0.08
+        ):
+            return float((y8 + y12) / 2.0)
+    return float(y8)
 
 
 class EventState(enum.Enum):
@@ -86,10 +98,12 @@ class EventEngine:
         self._scroll_deadzone_cleared = False
         self.scroll_accumulator = 0.0
         self._scroll_last_confirmed_at = 0.0
+        self._scroll_last_time = 0.0
         self.scroll_exit_grace_s = 0.12
 
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
+        self._drag_last_pinch_time = 0.0
         self._pinch_consumed = False
         self._second_pinch_pending = False
         self.click_anchor = None
@@ -117,6 +131,7 @@ class EventEngine:
         """
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
+        self._drag_last_pinch_time = 0.0
         self._pinch_consumed = False
         self._second_pinch_pending = False
         self.click_anchor = None
@@ -127,6 +142,7 @@ class EventEngine:
         self.scroll_start_y = None
         self.scroll_accumulator = 0.0
         self._scroll_last_confirmed_at = 0.0
+        self._scroll_last_time = 0.0
         self._right_click_armed = True
         self.mouse.mouse.release_all()
         self._change_state(EventState.HAND_LOST)
@@ -176,6 +192,7 @@ class EventEngine:
         # ── Drag cursor ───────────────────────────────────────────────────────
         if self.state == EventState.DRAGGING:
             if is_pinching:
+                self._drag_last_pinch_time = now
                 # Section 37: Use pinch midpoint for superior drag stability
                 if lms_list and len(lms_list) >= 21 and hasattr(lms_list[4], "pixel_x") and hasattr(lms_list[8], "pixel_x"):
                     drag_x = int((lms_list[4].pixel_x + lms_list[8].pixel_x) / 2.0)
@@ -184,8 +201,21 @@ class EventEngine:
                     drag_x, drag_y = index_x, index_y
                 self.mouse.mouse.move(drag_x, drag_y, frame_w, frame_h)
             else:
-                self.mouse.mouse.drag(start=False)
-                self._change_state(EventState.COOLDOWN, now=now)
+                # Section 38 & 39: Bounded dropout grace (120ms) for transient Unknown/None
+                within_drag_grace = (
+                    raw_gesture in ("Unknown", "None", "")
+                    and lms_list is not None
+                    and len(lms_list) >= 21
+                    and (now - getattr(self, "_drag_last_pinch_time", now)) <= 0.120
+                )
+                if within_drag_grace:
+                    if lms_list and len(lms_list) >= 21 and hasattr(lms_list[4], "pixel_x") and hasattr(lms_list[8], "pixel_x"):
+                        drag_x = int((lms_list[4].pixel_x + lms_list[8].pixel_x) / 2.0)
+                        drag_y = int((lms_list[4].pixel_y + lms_list[8].pixel_y) / 2.0)
+                        self.mouse.mouse.move(drag_x, drag_y, frame_w, frame_h)
+                else:
+                    self.mouse.mouse.drag(start=False)
+                    self._change_state(EventState.COOLDOWN, now=now)
 
         # ── F-06 FIX: right-click release gate ────────────────────────────────
         if stable_gesture != "Three Fingers" and raw_gesture != "Three Fingers":
@@ -207,6 +237,7 @@ class EventEngine:
                 self._scroll_deadzone_cleared = False
                 self.scroll_accumulator = 0.0
                 self._scroll_last_confirmed_at = now
+                self._scroll_last_time = now
                 self._change_state(EventState.SCROLLING, now=now)
 
             elif stable_gesture == raw_gesture == "Three Fingers" and self._right_click_armed:
@@ -231,7 +262,7 @@ class EventEngine:
                 else:
                     self._change_state(EventState.PINCH_RELEASE_WAIT, now=now)
             else:
-                # Section 32: Adaptive drag intent (motion-based or hold-based)
+                # Section 32 & 33: Adaptive drag intent (motion-based or hold-based)
                 mapped = getattr(self.mouse.mouse, "map_coordinates", None)
                 if callable(mapped):
                     try:
@@ -249,7 +280,7 @@ class EventEngine:
                     anchor_x, anchor_y = screen_x, screen_y
                 displacement = math.hypot(screen_x - anchor_x, screen_y - anchor_y)
 
-                is_drag_motion = (hold_duration >= 0.12 and displacement >= 16.0)
+                is_drag_motion = (hold_duration >= 0.12 and displacement >= 20.0)
                 is_drag_hold = (hold_duration >= self.drag_hold_ms)
 
                 if is_drag_motion or is_drag_hold:
@@ -263,6 +294,7 @@ class EventEngine:
                         except Exception:
                             pass
                     self.mouse.mouse.drag(start=True)
+                    self._drag_last_pinch_time = now
                     self._change_state(EventState.DRAGGING, now=now)
                     # Section 37: Drag coordinate source
                     if lms_list and len(lms_list) >= 21 and hasattr(lms_list[4], "pixel_x") and hasattr(lms_list[8], "pixel_x"):
@@ -276,7 +308,9 @@ class EventEngine:
             if is_pinching:
                 if now - self.pinch_release_time <= self.double_click_window_ms:
                     self._second_pinch_pending = True
-                    self.click_anchor = self.mouse.mouse.get_cursor_pos()
+                    # Preserve original click anchor so second click lands on the EXACT spot
+                    if self.click_anchor is None:
+                        self.click_anchor = self.mouse.mouse.get_cursor_pos()
                     self.pinch_down_time = now
                     self._change_state(EventState.PINCH_DOWN, now=now)
                 else:
@@ -306,6 +340,7 @@ class EventEngine:
                 self._scroll_deadzone_cleared = False
                 self.scroll_accumulator = 0.0
                 self._scroll_last_confirmed_at = 0.0
+                self._scroll_last_time = 0.0
                 self._change_state(EventState.HOVER, now=now)
             elif lms_list:
                 current_y = _extract_scroll_y(lms_list)
@@ -325,15 +360,19 @@ class EventEngine:
                     scale = scale_factor if math.isfinite(scale_factor) and scale_factor > 0 else 1.0
                     scale = min(4.0, max(0.25, scale))
                     dy = (current_y - self.scroll_start_y) * scale
+
                     self.scroll_accumulator += dy
 
-                    # Section 42 & 43: Bounded velocity (-3 <= ticks <= 3)
+                    # Bounded velocity (-3 <= ticks <= 3) with decay on stop
                     scroll_threshold = 0.03
                     ticks = math.trunc(self.scroll_accumulator / scroll_threshold)
                     if ticks:
                         clamped_ticks = -max(-3, min(3, ticks))
                         self.mouse.mouse.scroll(clamped_ticks)
                         self.scroll_accumulator -= ticks * scroll_threshold
+                    elif abs(dy) < 0.001:
+                        # Hand is stationary: decay residual accumulator to prevent trailing drift
+                        self.scroll_accumulator *= 0.5
                 self.scroll_start_y = current_y
 
         elif self.state == EventState.COOLDOWN:
