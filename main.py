@@ -189,13 +189,13 @@ class MainApp:
             self._tracking_generation += 1
             self._tracking_capture_time = None
             self._rearm_neutral_frames = 0
-            # Release first, even if resetting a downstream controller fails.
-            self.mapper.mouse.release_all()
-            self.mapper.reset_temporal_state()
+            # Central safety invalidation for mapper, mouse, and gesture engine
+            if hasattr(self.mapper, "mouse") and self.mapper.mouse is not None:
+                if hasattr(self.mapper.mouse, "release_all"):
+                    self.mapper.mouse.release_all()
+            if hasattr(self.mapper, "reset_temporal_state"):
+                self.mapper.reset_temporal_state()
             self.classifier.reset()
-            # Cancel any queued slow action so it cannot fire after a pause or
-            # mode-switch. The generation bump above already guards against stale
-            # inference results; this is the corresponding guard for actions.
             if hasattr(self.mapper, "_action_executor"):
                 self.mapper._action_executor.cancel("tracking invalidated")
 
@@ -380,6 +380,9 @@ class MainApp:
             def on_open(icon, item):
                 self.ui_commands.post(self._show_dashboard_on_tk_thread)
 
+            def on_stop_bg(icon, item):
+                self.ui_commands.post(self._show_dashboard_on_tk_thread)
+
             def on_pause(icon, item):
                 self.ui_commands.post(self.set_automation_enabled, False)
 
@@ -399,15 +402,16 @@ class MainApp:
                 self.ui_commands.post(self.ui.force_quit)
 
             menu = pystray.Menu(
-                pystray.MenuItem("Open SmartGestureOS", on_open, default=True),
+                pystray.MenuItem("Open SmartGestureOS / Show Dashboard", on_open, default=True),
+                pystray.MenuItem("Stop Background Mode (Show Dashboard)", on_stop_bg),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Pause Automation", on_pause),
-                pystray.MenuItem("Resume Automation", on_resume),
+                pystray.MenuItem("Resume Gesture Control", on_resume),
+                pystray.MenuItem("Pause Gesture Control", on_pause),
                 pystray.MenuItem("Show Status", on_status),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Exit", on_quit),
+                pystray.MenuItem("Exit SmartGestureOS", on_quit),
             )
-            self.tray_icon = pystray.Icon("SmartGestureOS", image, "SmartGestureOS", menu)
+            self.tray_icon = pystray.Icon("SmartGestureOS", image, "SmartGestureOS — ACTIVE", menu)
             self.tray_icon.run()
         except Exception:
             logger.exception("System tray error:")
@@ -870,10 +874,18 @@ class MainApp:
                     elif has_new_result and not rearm_ok:
                         latest_action, latest_progress = "Re-arming", 0.0
                     elif has_new_result:
+                        kwargs = {"render_canvas": False, "capture_at": capture_time}
+                        try:
+                            import inspect
+                            target_func = getattr(self.mapper.process, "side_effect", None) or self.mapper.process
+                            sig = inspect.signature(target_func)
+                            if "confidence" in sig.parameters:
+                                kwargs["confidence"] = latest_confidence
+                        except Exception:
+                            pass
                         display_frame, latest_action, latest_progress = self.mapper.process(
                             latest_hands_data, latest_stable_gesture,
-                            latest_raw_gesture, display_frame, render_canvas=False,
-                            capture_at=capture_time,
+                            latest_raw_gesture, display_frame, **kwargs
                         )
                         routed_result = True
                         # Interaction telemetry for physical diagnosis.

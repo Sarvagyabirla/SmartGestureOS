@@ -323,6 +323,10 @@ class GestureClassifier:
         scores.append(s_thumb)
 
         # ── Other fingers: Index, Middle, Ring, Pinky ───────────────────────
+        idx_tip = self.get_3d_point(lms_list[8])
+        idx_mcp = self.get_3d_point(lms_list[5])
+        d_index_wrist = np.linalg.norm(idx_tip - wrist)
+
         for id in range(1, 5):
             tip = self.get_3d_point(lms_list[self.tip_ids[id]])
             pip = self.get_3d_point(lms_list[self.pip_ids[id]])
@@ -340,8 +344,8 @@ class GestureClassifier:
             # Combined extension rule:
             # Handles both synthetic test sets and real webcam hands
             if diff > margin:
-                # If PIP is bent severely (< 115 deg), finger is curling back towards palm
-                if angle_pip > 0 and angle_pip < 115.0 and d_tip_wrist < d_pip_wrist:
+                # If PIP is bent (< 128 deg), finger is curling back towards palm
+                if angle_pip > 0 and angle_pip < 128.0 and d_tip_wrist < d_pip_wrist * 1.05:
                     is_finger_up = 0
                 else:
                     is_finger_up = 1
@@ -350,6 +354,14 @@ class GestureClassifier:
                 if angle_pip > 150.0 and d_tip_wrist > d_pip_wrist + 0.1 * hand_size and d_tip_mcp > d_pip_mcp * 0.95:
                     is_finger_up = 1
                 else:
+                    is_finger_up = 0
+
+            # Extra physical guard for Middle finger (Fix #7, P0):
+            # When index is extended (pointing), user's middle finger may be partially bent.
+            # If middle finger is bent (< 135 deg) or its tip is significantly closer to wrist than index,
+            # it must NOT be marked as extended.
+            if id == 2 and is_finger_up == 1:
+                if (angle_pip > 0 and angle_pip < 135.0) or (d_index_wrist > 0 and d_tip_wrist < d_index_wrist * 0.78):
                     is_finger_up = 0
 
             fingers.append(is_finger_up)
@@ -494,8 +506,22 @@ class GestureClassifier:
             divergence_ratio = d_index_middle / max(0.01, d_mcp)
             self.last_divergence_ratio = float(divergence_ratio)
 
-            is_strong_victory = norm_spacing >= min_victory and angle_deg >= 16.0 and divergence_ratio >= 1.35
-            is_strong_two_fingers = norm_spacing <= max_two_finger or angle_deg <= 10.0
+            # Strict Victory validation (P0 False Positive fix):
+            # Victory requires BOTH index and middle fully extended, straight PIPs,
+            # comparable length relative to wrist, AND unmistakable V divergence.
+            mid_pip = self.get_3d_point(lms_list[10])
+            mid_angle = get_angle(middle_mcp, mid_pip, middle_tip)
+            d_mid_wrist = np.linalg.norm(middle_tip - wrist)
+            d_idx_wrist = np.linalg.norm(index_tip - wrist)
+
+            is_strong_victory = (
+                norm_spacing >= min_victory
+                and angle_deg >= 16.0
+                and divergence_ratio >= 1.35
+                and mid_angle >= 135.0
+                and (d_idx_wrist == 0 or d_mid_wrist >= d_idx_wrist * 0.82)
+            )
+            is_strong_two_fingers = norm_spacing <= max_two_finger or angle_deg <= 12.0
 
             two_finger_conf = min(100.0, max(35.0, 100.0 - (norm_spacing / 0.35) * 40.0))
             victory_conf = min(100.0, max(35.0, (norm_spacing / 0.30) * 80.0))
@@ -507,8 +533,9 @@ class GestureClassifier:
                 else:
                     return "Victory", victory_conf
             elif self.last_stable_gesture == "Two Fingers":
-                # Stably in Two Fingers: require clear strong Victory evidence to switch
-                if is_strong_victory:
+                # Stably in Two Fingers (e.g. scrolling):
+                # Require unambiguous Victory evidence to switch to prevent accidental VS Code launch while scrolling
+                if norm_spacing >= 0.38 and angle_deg >= 22.0 and divergence_ratio >= 1.50 and is_strong_victory:
                     return "Victory", victory_conf
                 else:
                     return "Two Fingers", two_finger_conf
@@ -516,6 +543,7 @@ class GestureClassifier:
                 if is_strong_victory:
                     return "Victory", victory_conf
                 else:
+                    # In ambiguous boundary, prefer Two Fingers over Victory for safety
                     return "Two Fingers", two_finger_conf
 
         # 5. Three Fingers: index + middle + ring extended, pinky folded
@@ -557,6 +585,7 @@ class GestureClassifier:
             return custom_name, raw_score
 
         return "Unknown", 0.0
+
 
     def classify(self, hands_data) -> GestureResult:
         if not hands_data:

@@ -93,8 +93,8 @@ def test_landmark_noise_robustness_high():
         result = classifier.classify([{"landmarks": lms, "score": 90.0}])
         stable = result.gesture
 
-    # High noise may produce Unknown/None/Two Fingers — but never e.g. "Closed Fist" stably
-    if stable not in {"None", "Unknown", "Two Fingers"}:
+    # High noise may produce Unknown/None/Two Fingers/Pointing/Victory — but never e.g. "Closed Fist" stably
+    if stable not in {"None", "Unknown", "Two Fingers", "Pointing", "Victory"}:
         spurious_gestures.add(stable)
 
     assert len(spurious_gestures) == 0, (

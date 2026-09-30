@@ -67,7 +67,19 @@ def migrate_legacy_user_data(source: Path, destination: Path) -> bool:
 # Specific user data subdirectories
 PROFILES_DIR = USER_DATA_DIR / "profiles"
 LOGS_DIR = USER_DATA_DIR / "logs"
-SCREENSHOTS_DIR = USER_DATA_DIR / "screenshots"
+
+def get_screenshots_dir() -> Path:
+    """Canonical user-accessible screenshot directory: %USERPROFILE%\\Pictures\\SmartGestureOS\\Screenshots."""
+    try:
+        pictures = Path.home() / "Pictures" / "SmartGestureOS" / "Screenshots"
+        pictures.mkdir(parents=True, exist_ok=True)
+        return pictures
+    except Exception:
+        fallback = USER_DATA_DIR / "screenshots"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+SCREENSHOTS_DIR = get_screenshots_dir()
 DRAWINGS_DIR = USER_DATA_DIR / "drawings"
 BENCHMARKS_DIR = USER_DATA_DIR / "benchmarks"
 CUSTOM_GESTURES_DIR = USER_DATA_DIR / "custom_gestures"

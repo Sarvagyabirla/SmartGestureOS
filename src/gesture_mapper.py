@@ -51,13 +51,14 @@ _ASYNC_ACTIONS = frozenset({
 # Action-specific policies (Section 20 & 21):
 # Centralized action timing, dropout grace, and release gating policy table.
 _ACTION_POLICY = {
-    # Fast discrete (volume / right click): 200 ms
+    # Fast discrete (volume / right click): 150-200 ms
     "volume_up": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": False, "repeatable": True},
     "volume_down": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": False, "repeatable": True},
-    "right_click": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "right_click": {"hold_ms": 150, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "play_pause": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "next_track": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
-    "previous_track": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "prev_track": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "mute": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "mute_master": {"hold_ms": 200, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
 
     # Normal discrete: 300 ms
@@ -66,21 +67,25 @@ _ACTION_POLICY = {
     "cycle_color": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "toggle_eraser": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
 
-    # High impact discrete: 300 ms (Section 20)
+    # High impact discrete: 300 ms hold, release required
     "screenshot": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "open_vscode": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "open_chrome": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "open_calculator": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "open_explorer": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "open_notepad": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "task_view": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "show_desktop": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "lock_pc": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "switch_mode": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "save_drawing": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "clear_canvas": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
+    "open_screenshots_folder": {"hold_ms": 300, "dropout_grace_ms": 120, "require_release": True, "repeatable": False},
     "toggle_sleep": {"hold_ms": 3000, "dropout_grace_ms": 150, "require_release": True, "repeatable": False},
 }
 
 _DEFAULT_ACTION_POLICY = {
-    "hold_ms": 300,
+    "hold_ms": 350,
     "dropout_grace_ms": 120,
     "require_release": True,
     "repeatable": False,
@@ -296,6 +301,7 @@ class GestureMapper:
             "volume_down":      {"func": self.volume.volume_down,        "repeatable": True},
             "switch_mode":      {"func": self.cycle_mode,                "repeatable": False},
             "switch_to_draw":   {"func": lambda: self.set_mode("DRAW"), "repeatable": False},
+            "open_screenshots_folder": {"func": self.desktop.open_screenshots_folder, "repeatable": False},
             "undo":             {"func": self.canvas.undo,               "repeatable": True},
             "redo":             {"func": self.canvas.redo,               "repeatable": True},
             "save_drawing":     {"func": self.canvas.save_image,         "repeatable": False},
@@ -324,7 +330,17 @@ class GestureMapper:
             return _ACTION_POLICY[action_name]["hold_ms"] / 1000.0
         return self.timer.duration
 
-    # ── Temporal reset (§8) ────────────────────────────────────────────────────
+    # ── Invalidation & Temporal reset (§8) ────────────────────────────────────
+
+    def invalidate_interaction(self, reason: str = "invalidation") -> None:
+        """Central safety invalidation for GestureMapper and downstream controllers."""
+        if hasattr(self.mouse, "invalidate_interaction"):
+            self.mouse.invalidate_interaction(reason)
+        else:
+            self.mouse.release_all()
+        self.reset_temporal_state()
+        if hasattr(self, "_action_executor"):
+            self._action_executor.cancel(reason)
 
     def reset_temporal_state(self) -> None:
         """

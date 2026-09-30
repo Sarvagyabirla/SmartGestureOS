@@ -313,8 +313,10 @@ def main():
             self.mapper.cycle_mode = lambda: None
             self.mapper.brightness.set_brightness_from_y = lambda _y: ActionResult(
                 False, "brightness", "Brightness is disabled during the mouse check")
-            self.ui.settings_btn.configure(state="disabled")
-            self.ui.train_btn.configure(state="disabled")
+            if hasattr(self.ui, "settings_btn") and self.ui.settings_btn:
+                self.ui.settings_btn.configure(state="disabled")
+            if hasattr(self.ui, "train_btn") and self.ui.train_btn:
+                self.ui.train_btn.configure(state="disabled")
             self.target = MouseTarget(self, args.report)
             super().start_system()
             self.target.poll()

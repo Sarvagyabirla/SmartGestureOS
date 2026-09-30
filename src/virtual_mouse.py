@@ -161,17 +161,24 @@ class VirtualMouse:
         return True
                 
     def click(self, button="left"):
+        """Emit a Windows mouse click with deterministic down/up interval."""
         if button == "left":
             self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(0.010)
             self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
         elif button == "right":
             self.user32.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+            time.sleep(0.015)
             self.user32.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             
     def double_click(self):
+        """Emit two consecutive clicks within Windows double-click timing at exact coordinates."""
         self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.010)
         self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.030)
         self.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.010)
         self.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             
     def scroll(self, amount):
@@ -215,3 +222,7 @@ class VirtualMouse:
             self.is_dragging = False
             self.last_pos = None
             self.smoother.reset()
+
+    def invalidate_interaction(self, reason: str = "reset"):
+        """Centralized safety invalidation for VirtualMouse."""
+        self.release_all()

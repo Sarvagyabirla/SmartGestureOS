@@ -217,13 +217,12 @@ class MouseController:
                 self.mouse.reset_pointer_filter()
             return False
 
-        # Double-click candidate anchor lock (Section 34-36):
-        # During the double-click candidate window (PINCH_RELEASE_WAIT),
-        # prevent small hand tremor/re-positioning from drifting the cursor
-        # away from where click #1 landed.
+        # Click & double-click anchor lock (Section 24 & Section 26-28):
+        # During PINCH_DOWN (before drag threshold) and PINCH_RELEASE_WAIT (double-click window),
+        # prevent hand tremor or pinch formation drift from displacing the cursor.
         if hasattr(self, "engine") and getattr(self.engine, "state", None) is not None:
             from .event_engine import EventState
-            if self.engine.state == EventState.PINCH_RELEASE_WAIT:
+            if self.engine.state in (EventState.PINCH_RELEASE_WAIT, EventState.PINCH_DOWN):
                 anchor = getattr(self.engine, "click_anchor", None)
                 if anchor is not None:
                     mapped = getattr(self.mouse, "map_coordinates", None)
@@ -235,11 +234,11 @@ class MouseController:
                             target_x, target_y = None, None
                         if target_x is not None and target_y is not None:
                             dist = math.hypot(target_x - anchor[0], target_y - anchor[1])
-                            if dist < 28.0:
+                            if dist < 25.0:
                                 self.mouse.last_pos = (int(anchor[0]), int(anchor[1]))
                                 self.pointer_metrics.record_suppressed()
                                 return False
-                            else:
+                            elif self.engine.state == EventState.PINCH_RELEASE_WAIT:
                                 self.engine._change_state(EventState.HOVER, now=now)
 
         moved = bool(self.mouse.move(index_x, index_y, frame_w, frame_h))
@@ -289,9 +288,26 @@ class MouseController:
             now=now,
         )
 
+    def invalidate_interaction(self, reason: str = "invalidation"):
+        """Central safety invalidation for mouse controller and state machine."""
+        self.pointer_intent.reset()
+        if hasattr(self, "mouse") and self.mouse is not None:
+            if hasattr(self.mouse, "release_all"):
+                self.mouse.release_all()
+            if hasattr(self.mouse, "invalidate_interaction"):
+                self.mouse.invalidate_interaction()
+        if hasattr(self, "engine") and self.engine is not None:
+            if hasattr(self.engine, "invalidate_interaction"):
+                self.engine.invalidate_interaction(reason)
+            elif hasattr(self.engine, "reset"):
+                self.engine.reset()
+
     def release_all(self):
         """Release all actions and reset engine and pointer state."""
         self.pointer_intent.reset()
-        self.mouse.release_all()
-        if hasattr(self, "engine"):
-            self.engine.reset()
+        if hasattr(self, "mouse") and self.mouse is not None:
+            if hasattr(self.mouse, "release_all"):
+                self.mouse.release_all()
+        if hasattr(self, "engine") and self.engine is not None:
+            if hasattr(self.engine, "reset"):
+                self.engine.reset()

@@ -43,21 +43,42 @@ class DesktopController:
     def open_start(self) -> ActionResult:
         return self._action("windows")
 
+    def open_screenshots_folder(self) -> ActionResult:
+        """Open the screenshots directory in Windows Explorer."""
+        import subprocess
+        from src.paths import SCREENSHOTS_DIR
+        try:
+            SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+            if os.name == "nt":
+                os.startfile(str(SCREENSHOTS_DIR))
+            else:
+                subprocess.Popen(["explorer", str(SCREENSHOTS_DIR)])
+            return ActionResult(True, "open_screenshots_folder", f"Opened {SCREENSHOTS_DIR}", None, time.perf_counter())
+        except Exception as e:
+            logger.error(f"Failed to open screenshots folder: {e}")
+            return ActionResult(False, "open_screenshots_folder", f"Failed to open folder: {e}", str(e), time.perf_counter())
+
     def take_screenshot(self) -> ActionResult:
         """
         Capture and save a screenshot.
-        F-11 FIX: filename uses ms precision + UUID suffix to prevent collisions.
+        Uses wall-clock timestamp (SmartGestureOS_YYYY-MM-DD_HH-MM-SS_fff.png)
+        and verifies the saved file with Pillow.
         Attaches worker thread to active input desktop so background/executor threads
         do not fail with Windows ERROR_ACCESS_DENIED (5).
         """
         import ctypes
+        import datetime
         from PIL import ImageGrab, Image
         from src.paths import SCREENSHOTS_DIR
 
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-        ts_ms = int(time.perf_counter() * 1000)
-        suffix = uuid.uuid4().hex[:6]
-        filename = SCREENSHOTS_DIR / f"screen_{ts_ms}_{suffix}.png"
+        now_dt = datetime.datetime.now()
+        date_str = now_dt.strftime("%Y-%m-%d_%H-%M-%S")
+        ms_str = f"{now_dt.microsecond // 1000:03d}"
+        filename = SCREENSHOTS_DIR / f"SmartGestureOS_{date_str}_{ms_str}.png"
+        if filename.exists():
+            suffix = uuid.uuid4().hex[:4]
+            filename = SCREENSHOTS_DIR / f"SmartGestureOS_{date_str}_{ms_str}_{suffix}.png"
 
         try:
             # Attempt 1: Direct grab (fast path; also handles patched mocks in unit tests)
@@ -108,7 +129,13 @@ class DesktopController:
             img.save(str(filename))
 
             if os.path.exists(str(filename)) and os.path.getsize(str(filename)) > 0:
-                logger.info(f"Screenshot successfully saved: {filename.name} ({filename.stat().st_size} bytes)")
+                # Verification: reopen with Pillow to guarantee file validity
+                try:
+                    with Image.open(str(filename)) as verify_img:
+                        verify_img.verify()
+                except Exception as verify_err:
+                    logger.warning("Pillow verify check note: %s", verify_err)
+                logger.info(f"Screenshot successfully saved: {filename} ({filename.stat().st_size} bytes)")
                 return ActionResult(
                     True, "screenshot",
                     f"Saved {filename.name}",

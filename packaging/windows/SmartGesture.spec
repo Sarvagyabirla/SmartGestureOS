@@ -100,7 +100,7 @@ a = Analysis(
         'pystray',
         'pystray._win32',
         'pystray._base',
-        'pystray._win32_adapter',
+        'pystray._util',
     ],
     hookspath=[],
     hooksconfig={},

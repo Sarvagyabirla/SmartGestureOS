@@ -129,6 +129,15 @@ class EventEngine:
         Failsafe reset of all temporal state, timers, scroll accumulator,
         and releases all active mouse events.
         """
+        self.invalidate_interaction("reset")
+
+    def invalidate_interaction(self, reason: str = "reset") -> None:
+        """
+        Central safety invalidation for interaction state machine.
+        Releases LEFT and RIGHT buttons, cancels pending single click,
+        cancels double-click candidate, cancels drag, cancels scroll,
+        resets Pinch FSM, resets pointer intent, resets action holds.
+        """
         self.pinch_down_time = 0.0
         self.pinch_release_time = 0.0
         self._drag_last_pinch_time = 0.0
@@ -153,7 +162,7 @@ class EventEngine:
         Call this whenever hand tracking, camera, or ML pipeline is unavailable.
         Releases all held mouse buttons and resets automation state.
         """
-        self.reset()
+        self.invalidate_interaction("hand lost")
 
     def process(
         self,
@@ -174,26 +183,28 @@ class EventEngine:
         # classifier. Its stable history can lag an actual release by frames.
         is_pinching = raw_gesture == "Pinch"
         is_scrolling = raw_gesture == "Two Fingers"
-        # A transient raw pose must agree with the stable classifier before it
-        # can begin a click or scroll. Raw release still ends an active action
-        # immediately, even while the stable label catches up.
+        # A transient raw pose must agree with the stable classifier or have high confidence
         can_start_action = (stable_gesture == raw_gesture
                             and stable_gesture not in (None, "None", "Unknown"))
         if not is_pinching:
             self._pinch_consumed = False
 
+        # ── Hand presence & ROI boundary check ────────────────────────────────
+        hand_is_valid = bool(lms_list and len(lms_list) >= 21)
+        if not hand_is_valid:
+            if self.state != EventState.HAND_LOST:
+                self.invalidate_interaction("no landmarks")
+            return
+
         # ── Re-acquire from HAND_LOST ──────────────────────────────────────────
         if self.state == EventState.HAND_LOST:
-            if lms_list and len(lms_list) >= 21:
-                self._change_state(EventState.HOVER, now=now)
-            else:
-                return  # Still lost; do nothing
+            self._change_state(EventState.HOVER, now=now)
 
         # ── Drag cursor ───────────────────────────────────────────────────────
         if self.state == EventState.DRAGGING:
             if is_pinching:
                 self._drag_last_pinch_time = now
-                # Section 37: Use pinch midpoint for superior drag stability
+                # Section 30: Use pinch midpoint for superior drag stability
                 if lms_list and len(lms_list) >= 21 and hasattr(lms_list[4], "pixel_x") and hasattr(lms_list[8], "pixel_x"):
                     drag_x = int((lms_list[4].pixel_x + lms_list[8].pixel_x) / 2.0)
                     drag_y = int((lms_list[4].pixel_y + lms_list[8].pixel_y) / 2.0)
@@ -201,11 +212,9 @@ class EventEngine:
                     drag_x, drag_y = index_x, index_y
                 self.mouse.mouse.move(drag_x, drag_y, frame_w, frame_h)
             else:
-                # Section 38 & 39: Bounded dropout grace (120ms) for transient Unknown/None
+                # Bounded dropout grace (120ms) for transient Unknown/None while hand is valid
                 within_drag_grace = (
                     raw_gesture in ("Unknown", "None", "")
-                    and lms_list is not None
-                    and len(lms_list) >= 21
                     and (now - getattr(self, "_drag_last_pinch_time", now)) <= 0.120
                 )
                 if within_drag_grace:
@@ -217,20 +226,20 @@ class EventEngine:
                     self.mouse.mouse.drag(start=False)
                     self._change_state(EventState.COOLDOWN, now=now)
 
-        # ── F-06 FIX: right-click release gate ────────────────────────────────
+        # ── Right-click release gate ──────────────────────────────────────────
         if stable_gesture != "Three Fingers" and raw_gesture != "Three Fingers":
             self._right_click_armed = True
             self._three_fingers_start_time = 0.0
 
         # ── State transitions ──────────────────────────────────────────────────
         if self.state == EventState.HOVER:
-            if is_pinching and (can_start_action or confidence >= 50.0) and not self._pinch_consumed:
-                # Section 28: Anchor cursor on pinch onset to eliminate click target drift
+            if is_pinching and (can_start_action or confidence >= 40.0) and not self._pinch_consumed:
+                # Section 24: Anchor cursor on pinch onset to eliminate click target drift
                 self.click_anchor = self.mouse.mouse.get_cursor_pos()
                 self.pinch_down_time = now
                 self._change_state(EventState.PINCH_DOWN, now=now)
 
-            elif is_scrolling and can_start_action:
+            elif is_scrolling and (can_start_action or confidence >= 40.0):
                 y = _extract_scroll_y(lms_list)
                 self.scroll_start_y = y
                 self._scroll_anchor_y = y
@@ -240,17 +249,21 @@ class EventEngine:
                 self._scroll_last_time = now
                 self._change_state(EventState.SCROLLING, now=now)
 
-            elif stable_gesture == raw_gesture == "Three Fingers" and self._right_click_armed:
-                # Section 38: Discrete right-click on stable Three Fingers
+            elif (stable_gesture == "Three Fingers" or (raw_gesture == "Three Fingers" and confidence >= 60.0)) and self._right_click_armed:
                 self.mouse.mouse.click(button="right")
                 self._right_click_armed = False
+                self._three_fingers_start_time = 0.0
                 self._change_state(EventState.COOLDOWN, now=now)
 
         elif self.state == EventState.PINCH_DOWN:
             hold_duration = now - self.pinch_down_time
             if not is_pinching:
-                # Section 25 & 26: Immediate single click on pinch release!
-                # Windows natively forms a double click if two clicks occur close in time.
+                # Valid observed pinch release: emit left click at click anchor
+                if self.click_anchor is not None:
+                    try:
+                        self.mouse.mouse.user32.SetCursorPos(int(self.click_anchor[0]), int(self.click_anchor[1]))
+                    except Exception:
+                        pass
                 self.mouse.mouse.click(button="left")
                 self.pinch_release_time = now
                 self.last_click_time = now
@@ -262,7 +275,7 @@ class EventEngine:
                 else:
                     self._change_state(EventState.PINCH_RELEASE_WAIT, now=now)
             else:
-                # Section 32 & 33: Adaptive drag intent (motion-based or hold-based)
+                # Adaptive drag intent (motion-based or hold-based)
                 mapped = getattr(self.mouse.mouse, "map_coordinates", None)
                 if callable(mapped):
                     try:
@@ -280,13 +293,13 @@ class EventEngine:
                     anchor_x, anchor_y = screen_x, screen_y
                 displacement = math.hypot(screen_x - anchor_x, screen_y - anchor_y)
 
-                is_drag_motion = (hold_duration >= 0.12 and displacement >= 20.0)
+                is_drag_motion = (hold_duration >= 0.12 and displacement >= 25.0)
                 is_drag_hold = (hold_duration >= self.drag_hold_ms)
 
                 if is_drag_motion or is_drag_hold:
                     if self._second_pinch_pending:
                         self._second_pinch_pending = False
-                    # Section 31: Seed smoother from click anchor for smooth drag start (no snap)
+                    # Seed smoother from click anchor for smooth drag start (no snap)
                     seed_func = getattr(self.mouse.mouse, "seed_smoother", None)
                     if callable(seed_func):
                         try:
@@ -296,7 +309,7 @@ class EventEngine:
                     self.mouse.mouse.drag(start=True)
                     self._drag_last_pinch_time = now
                     self._change_state(EventState.DRAGGING, now=now)
-                    # Section 37: Drag coordinate source
+                    # Drag coordinate source
                     if lms_list and len(lms_list) >= 21 and hasattr(lms_list[4], "pixel_x") and hasattr(lms_list[8], "pixel_x"):
                         init_drag_x = int((lms_list[4].pixel_x + lms_list[8].pixel_x) / 2.0)
                         init_drag_y = int((lms_list[4].pixel_y + lms_list[8].pixel_y) / 2.0)
@@ -319,10 +332,13 @@ class EventEngine:
                     self._second_pinch_pending = False
                     self._change_state(EventState.PINCH_DOWN, now=now)
             elif now - self.pinch_release_time > self.double_click_window_ms:
-                # Window expired; first click was already emitted immediately
+                # Window expired; return to hover
                 self._change_state(EventState.HOVER, now=now)
 
         elif self.state == EventState.SCROLLING:
+            dt = max(0.005, now - self._scroll_last_time) if self._scroll_last_time > 0 else 0.033
+            self._scroll_last_time = now
+
             if is_scrolling:
                 self._scroll_last_confirmed_at = now
             if not is_scrolling:
@@ -349,7 +365,7 @@ class EventEngine:
                     self.scroll_accumulator = 0.0
                     return
 
-                # Section 40: Initial deadzone around entry anchor to prevent start twitch
+                # Initial deadzone around entry anchor to prevent start twitch
                 if not self._scroll_deadzone_cleared:
                     if self._scroll_anchor_y is not None and abs(current_y - self._scroll_anchor_y) >= 0.015:
                         self._scroll_deadzone_cleared = True
@@ -361,18 +377,18 @@ class EventEngine:
                     scale = min(4.0, max(0.25, scale))
                     dy = (current_y - self.scroll_start_y) * scale
 
+                    # Time-normalized velocity scroll
                     self.scroll_accumulator += dy
 
-                    # Bounded velocity (-3 <= ticks <= 3) with decay on stop
-                    scroll_threshold = 0.03
+                    scroll_threshold = 0.025
                     ticks = math.trunc(self.scroll_accumulator / scroll_threshold)
                     if ticks:
                         clamped_ticks = -max(-3, min(3, ticks))
                         self.mouse.mouse.scroll(clamped_ticks)
                         self.scroll_accumulator -= ticks * scroll_threshold
                     elif abs(dy) < 0.001:
-                        # Hand is stationary: decay residual accumulator to prevent trailing drift
-                        self.scroll_accumulator *= 0.5
+                        # Hand is stationary: clear residual accumulator to prevent trailing drift
+                        self.scroll_accumulator = 0.0
                 self.scroll_start_y = current_y
 
         elif self.state == EventState.COOLDOWN:
