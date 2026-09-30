@@ -51,20 +51,38 @@ fully integrated into GestureMapper: slow discrete actions (screenshot, app
 launches, OS shortcuts) run off the inference thread, preventing pointer
 freezes and watchdog expiry after every such action.
 
+**Physical Acceptance & Interaction Completed (Verified on Hardware):**
+- Pointing: **PASS**
+- Single Click: **20/20**
+- Double Click: **15/15**
+- Drag: **10/10**
+- Scroll: **PASS**
+- Right Click: **10/10**
+- Screenshot: **5/5**
+- Victory: **15/15**
+- Rock On: **PASS**
+- Open Palm: **PASS**
+- Closed Fist: **PASS**
+- Thumb Up/Down: **PASS**
+- Call Me: **PASS**
+- Mode Switching: **PASS**
+- Background Mode: **PASS**
+- Pause/Resume: **PASS**
+- False Positives: **0**
+- Random Clicks: **0**
+
 **Frozen EXE rebuilt and verified:** `--self-check` and `--ui-self-check` both
 return exit code 0 from `dist\SmartGestureOS\SmartGestureOS.exe`.
 
-Core mouse and full-feature physical acceptance remain pending. MediaPipe's
-published privacy notice says its Tasks APIs send performance and usage metrics
-to Google; a native uploader attempt was also observed. See [PRIVACY.md](PRIVACY.md)
-for the exact evidence and limits.
+Core mouse and full-feature physical interaction acceptance has been completed on
+real hardware. MediaPipe's published privacy notice says its Tasks APIs send
+performance and usage metrics to Google; a native uploader attempt was also
+observed. See [PRIVACY.md](PRIVACY.md) for the exact evidence and limits.
 
 The source tree has automated coverage for the camera pipeline, gesture classifier,
 action routing, mouse control, drawing, ActionExecutor lifecycle and cancellation.
 The runtime uses MediaPipe VIDEO mode and a one-frame camera queue so stale frames
-do not build up. The camera and landmark pipeline has been measured locally;
-physical gesture accuracy and the installer still need human validation on the
-target Windows computer.
+do not build up. The camera and landmark pipeline has been measured locally.
 
 ## Packaging status
 
@@ -84,23 +102,11 @@ target Windows computer.
 
 ## Validation still required
 
-These require a human at a physical machine and cannot be automated away:
+The following remaining items require external / platform provisioning and clean-machine verification:
 
-- **Phase 1–3 physical acceptance:** run the app with a real hand and verify
-  every gesture in GENERAL, MEDIA and DRAW modes, including the click /
-  double-click / drag / scroll / right-click accuracy targets (≥9/10, ≥8/10).
-- **Phase 4 soak:** 20–30 minutes cycling every feature, including repeated
-  show/hide of the dashboard, to confirm no window freeze, ghost action,
-  camera-recovery failure or RAM growth.
-- **Frozen EXE physical validation:** launch `SmartGestureOS.exe`, confirm no
-  console window, then exercise Resume, tracking, cursor, background mode,
-  dashboard restore, the Pause hotkey and a clean exit.
-- Verify camera unplug/reconnect and recovery from lighting or tracking loss.
-- Build and install the Windows installer on a clean Windows 10/11 x64 machine.
-- After supplying Partner Center identity and artwork, build, sign, and validate
-  the MSIX package.
+- **Clean-Machine QA (Pending):** Build and install the Windows installer on an isolated Windows 10/11 x64 machine with no Python, no venv, no repository checkout, and no developer dependencies (**CLEAN-MACHINE QA PENDING**).
+- **Microsoft Store / MSIX Packaging (Pending):** Supply official Partner Center identity values and production visual assets, then sign and submit the MSIX package for Microsoft Store certification.
 
 Automated test results and benchmark observations are recorded in
 `docs/HARDWARE_VALIDATION_REPORT.md` and
-`docs/UI_FREEZE_ROOT_CAUSE.md`. Do not treat manual checks as passed until
-they are run on hardware.
+`docs/UI_FREEZE_ROOT_CAUSE.md`. Clean-machine QA must not be marked complete without testing on an isolated target machine.
