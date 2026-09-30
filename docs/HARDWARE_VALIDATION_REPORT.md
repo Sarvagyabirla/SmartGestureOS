@@ -41,10 +41,10 @@ All measurements are strictly partitioned into evidence tiers to eliminate ambig
 
 ### Automated Test Suite
 
-- `pytest tests/`: **587 passed in 12.50s** (0 failures, 1 deprecation warning in CTk display scaling).
+- `pytest tests/`: **604 passed** (0 failures, 1 deprecation warning in CTk display scaling).
 - Regression suite `tests/test_final_mission_regressions.py`: **21/21 passed**.
 - Frozen Executable (`dist/SmartGestureOS/SmartGestureOS.exe`): `--self-check` & `--ui-self-check` passed with code 0 `[PACKAGED]`.
-- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822` `[PACKAGED]`.
+- Installer (`dist/release/SmartGestureOS-Setup-v0.9.1.exe`): Checksum verified in `dist/release/SHA256SUMS.txt` `[PACKAGED]`.
 
 ---
 

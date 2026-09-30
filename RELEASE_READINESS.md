@@ -2,8 +2,9 @@
 
 ## Current status
 
-Updated 30 September 2026: **587 automated tests pass** (0 failures, verified
+Updated 30 September 2026: **604 automated tests pass** (0 failures, verified
 clean across compileall, full pytest suite, pip check, and node site release checks).
+Clean-machine QA status: **CLEAN-MACHINE QA PENDING**.
 
 **Ultimate Final Engineering & Release-Readiness Pass (v0.9.1) Completed:**
 
@@ -18,7 +19,7 @@ clean across compileall, full pytest suite, pip check, and node site release che
 9. **COM Cache & Audio Hardening**: Redirected `comtypes.client.gen_dir` to `%LOCALAPPDATA%\SmartGestureOS\comtypes_gen` to ensure crash-free execution from read-only `Program Files`.
 10. **Frozen Executable & Installer v0.9.1 Built**:
     - `dist/SmartGestureOS/SmartGestureOS.exe` (`--self-check` & `--ui-self-check` code 0) `[PACKAGED]`.
-    - Inno Setup 6.7.3 installer: `dist/release/SmartGestureOS-Setup-v0.9.1.exe` (31.8 MB, SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822`) `[PACKAGED]`.
+    - Inno Setup installer: `dist/release/SmartGestureOS-Setup-v0.9.1.exe` (Authoritative SHA-256 in `dist/release/SHA256SUMS.txt`) `[PACKAGED]`.
 
 **Background Control Mode shipped.** A *Run in Background* button, a system
 tray menu (Open / Pause / Resume / Show Status / Exit) and a

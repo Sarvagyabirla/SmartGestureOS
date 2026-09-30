@@ -539,3 +539,49 @@ def test_shutdown_releases_both_hotkey_handles():
     assert app._hotkey_handle is None
     assert app._restore_hotkey_handle is None
     assert app.ui_commands.pending == 0
+
+
+def test_tray_status_updates_dynamically():
+    """Tray status reflects CAMERA DISCONNECTED, PAUSED, and ACTIVE."""
+    from src.models import ActionResult
+    app = _main_app_double()
+    app.tray_icon = MagicMock()
+
+    # 1. Camera disconnected
+    app.camera.is_connected = False
+    app.update_tray_status()
+    assert app.tray_icon.title == "SmartGestureOS — CAMERA DISCONNECTED"
+
+    # 2. Camera connected, automation paused
+    app.camera.is_connected = True
+    app._automation_enabled = False
+    app.update_tray_status()
+    assert app.tray_icon.title == "SmartGestureOS — PAUSED"
+
+    # 3. Camera connected, automation active
+    app._automation_enabled = True
+    app.update_tray_status()
+    assert app.tray_icon.title == "SmartGestureOS — ACTIVE"
+
+
+def test_screenshot_async_feedback_posts_to_ui():
+    """Screenshot completion safely posts formatted feedback to UI commands."""
+    from src.models import ActionResult
+    app = _main_app_double()
+    app.ui = MagicMock()
+
+    # Success case
+    success_result = ActionResult(True, "screenshot", "Saved SmartGestureOS_2026-09-30_23-00-00_123.png", None, 100.0)
+    app._on_async_action_complete("screenshot", success_result)
+    assert app.ui_commands.pending == 2
+    app.ui_commands.drain()
+    app.ui.show_status_message.assert_called_with("Screenshot saved — SmartGestureOS_2026-09-30_23-00-00_123.png")
+    app.ui.add_to_history.assert_called_with("Screenshot saved — SmartGestureOS_2026-09-30_23-00-00_123.png")
+
+    # Failure case
+    fail_result = ActionResult(False, "screenshot", "Capture failed", "device error", 101.0)
+    app._on_async_action_complete("screenshot", fail_result)
+    assert app.ui_commands.pending == 2
+    app.ui_commands.drain()
+    app.ui.show_status_message.assert_called_with("Screenshot failed: Capture failed")
+    app.ui.add_to_history.assert_called_with("Screenshot failed: Capture failed")

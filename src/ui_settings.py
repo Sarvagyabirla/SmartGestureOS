@@ -215,6 +215,13 @@ class SettingsUI(ctk.CTkToplevel):
         )
         self.trainer_btn.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
 
+        self.screenshots_folder_btn = ctk.CTkButton(
+            self.tab_advanced,
+            text="Open Screenshots Folder",
+            command=self.open_screenshots_folder
+        )
+        self.screenshots_folder_btn.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
+
     def open_gesture_test(self):
         # We call the master (SmartGestureApp) to open the test window
         if hasattr(self.master, "open_gesture_test"):
@@ -227,6 +234,10 @@ class SettingsUI(ctk.CTkToplevel):
     def open_trainer(self):
         if hasattr(self.master, "open_trainer"):
             self.master.open_trainer()
+
+    def open_screenshots_folder(self):
+        from src.desktop_controller import DesktopController
+        DesktopController().open_screenshots_folder()
 
     def on_profile_change(self, selected_profile):
         if not settings_manager.load_profile(selected_profile):

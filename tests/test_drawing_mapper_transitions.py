@@ -163,6 +163,8 @@ def test_raw_release_cancels_mapped_hold_until_a_fresh_hold(
     execute.assert_not_called()
     tick(0.71, gesture)
     tick(1.5, gesture)
+    if hasattr(mapper, "_action_executor") and mapper._action_executor:
+        mapper._action_executor._queue.join()
     execute.assert_called_once_with()
 
 

@@ -248,9 +248,10 @@ GestureHoldTimer = GestureIntentGate
 
 
 class GestureMapper:
-    def __init__(self, frame_w: int, frame_h: int):
+    def __init__(self, frame_w: int, frame_h: int, on_async_result=None):
         self.frame_w = frame_w
         self.frame_h = frame_h
+        self._on_async_result = on_async_result
 
         self.mouse = MouseController()
         self.keyboard = KeyboardController()
@@ -384,6 +385,12 @@ class GestureMapper:
         else:
             self.feedback.speak(name.replace("_", " "))
             logger.info("Async action '%s' completed in %.0f ms.", name, elapsed * 1000)
+
+        if self._on_async_result is not None:
+            try:
+                self._on_async_result(name, result)
+            except Exception:
+                logger.exception("Async result callback error:")
 
     def execute_action(self, action_name: str) -> str | None:
         """

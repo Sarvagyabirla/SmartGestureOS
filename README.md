@@ -26,7 +26,7 @@ and [current implementation evidence](docs/PRODUCT_EXECUTION_2026-09-27.md).
 
 ## Features
 
-**Release status (30 September 2026):** v0.9.1 engineering completion. 587 automated tests pass; installer compiled at `dist/release/SmartGestureOS-Setup-v0.9.1.exe` (SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822`). Clean-machine QA is pending; see [release readiness](RELEASE_READINESS.md). The
+**Release status (30 September 2026):** v0.9.1 engineering completion. 604 automated tests pass; installer compiled at `dist/release/SmartGestureOS-Setup-v0.9.1.exe`. Clean-machine QA is pending (CLEAN-MACHINE QA PENDING); see [release readiness](RELEASE_READINESS.md). The
 [privacy policy](PRIVACY.md) explains MediaPipe's published metrics disclosure,
 the observed native uploader activity, and the limits of local validation.
 
@@ -75,7 +75,7 @@ python main.py
 ```
 
 For installed users, the intended path is the product website → GitHub Release
-→ `SmartGestureOS-Setup-v0.9.0.exe` → Start Menu. A public validated release is
+→ `SmartGestureOS-Setup-v0.9.1.exe` → Start Menu. A public validated release is
 not available yet; do not treat source archives as Windows installers.
 
 ---
@@ -157,7 +157,7 @@ is visible.
 | Tray icon | **pystray** | System-tray menu for Background Control Mode |
 | Paths | **platformdirs** | User-writable data under `%LOCALAPPDATA%` |
 | Packaging | **PyInstaller** (ONEDIR, `console=False`) | Self-contained `SmartGestureOS.exe`, no Python needed |
-| Installer | **Inno Setup 6** | `SmartGestureOS-Setup-v0.9.0.exe` |
+| Installer | **Inno Setup 6** | `SmartGestureOS-Setup-v0.9.1.exe` |
 | Build/CI | **PowerShell** + **GitHub Actions** | Build, test, installer and release pipelines |
 | Website | **HTML / CSS / JavaScript** on **GitHub Pages** | Static project site, no backend |
 
@@ -170,14 +170,14 @@ no server, no multi-user account system, no relational data and no cloud
 sync, so a SQL/NoSQL database would add a dependency and a failure mode with
 no benefit. Persistence is deliberately local-first, plain files and JSON:
 
-| Path (under `%LOCALAPPDATA%\SmartGestureOS`) | Contents |
+| Path | Contents |
 |---|---|
-| `profiles\` | Gesture profiles and the active-profile pointer |
-| `custom_gestures\` | User-trained gesture templates |
-| `screenshots\` | Saved screenshots (PNG) |
-| `drawings\` | Saved canvas drawings (PNG) |
-| `logs\` | Rotating application log |
-| `benchmarks\` | Local performance measurements |
+| `%USERPROFILE%\Pictures\SmartGestureOS\Screenshots\` | Saved screenshots (PNG) |
+| `%LOCALAPPDATA%\SmartGestureOS\profiles\` | Gesture profiles and the active-profile pointer |
+| `%LOCALAPPDATA%\SmartGestureOS\custom_gestures\` | User-trained gesture templates |
+| `%LOCALAPPDATA%\SmartGestureOS\drawings\` | Saved canvas drawings (PNG) |
+| `%LOCALAPPDATA%\SmartGestureOS\logs\` | Rotating application log |
+| `%LOCALAPPDATA%\SmartGestureOS\benchmarks\` | Local performance measurements |
 
 Read-only resources (`models\`, `config\`) ship inside the application and
 are never written to — important because the program installs under
@@ -311,7 +311,7 @@ Build a Windows installer:
 .\scripts\build_installer.ps1
 ```
 
-Output: `dist\release\SmartGestureOS-Setup-v0.9.0.exe`
+Output: `dist\release\SmartGestureOS-Setup-v0.9.1.exe`
 
 The ONEDIR executable supports `--self-check` for native model inference and
 `--ui-self-check` for real dashboard/preview/auxiliary-window initialization.

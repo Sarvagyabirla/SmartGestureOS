@@ -106,10 +106,12 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Development-only packages
+        # Development-only and unused packages
         'pytest',
         'IPython',
         'notebook',
+        'tensorflow',
+        'tensorboard',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

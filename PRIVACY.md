@@ -64,7 +64,7 @@ The application writes the following files on your device:
 |------|-------|-----|
 | Application profiles (JSON) | `%LOCALAPPDATA%\SmartGestureOS\profiles\<name>.json` | Remember your preferences |
 | Custom gesture models (JSON) | `%LOCALAPPDATA%\SmartGestureOS\custom_gestures\custom_gestures.json` | Store gestures you trained |
-| Screenshots (PNG) | `%LOCALAPPDATA%\SmartGestureOS\screenshots\` | Saved when you use the screenshot action |
+| Screenshots (PNG) | `%USERPROFILE%\Pictures\SmartGestureOS\Screenshots\` (fallback: `%LOCALAPPDATA%\SmartGestureOS\screenshots\`) | Saved when you use the screenshot action |
 | Drawings (PNG) | `%LOCALAPPDATA%\SmartGestureOS\drawings\` | Saved when you use save-drawing in Draw mode |
 | Log files | `%LOCALAPPDATA%\SmartGestureOS\logs\smart_gesture_os.log` | Local debugging |
 

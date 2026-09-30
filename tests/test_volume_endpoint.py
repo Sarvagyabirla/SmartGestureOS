@@ -15,8 +15,10 @@ def audio(monkeypatch):
     endpoint.GetMasterVolumeLevelScalar.return_value = 0.5
     device = SimpleNamespace(EndpointVolume=endpoint)  # No obsolete Activate API.
     get_speakers = MagicMock(return_value=device)
-    com = SimpleNamespace(CoInitialize=MagicMock(), CoUninitialize=MagicMock())
+    com = SimpleNamespace(CoInitialize=MagicMock(), CoUninitialize=MagicMock(), client=SimpleNamespace(gen_dir=""))
+    com.__path__ = []
     monkeypatch.setitem(__import__("sys").modules, "comtypes", com)
+    monkeypatch.setitem(__import__("sys").modules, "comtypes.client", com.client)
     monkeypatch.setitem(__import__("sys").modules, "pycaw.pycaw",
                         SimpleNamespace(AudioUtilities=SimpleNamespace(GetSpeakers=get_speakers)))
     return endpoint, get_speakers, com
@@ -97,7 +99,7 @@ def test_reacquire_does_not_move_an_endpoint_to_another_com_thread(audio, monkey
     _, get_speakers, com = audio
     controller = VolumeController()
     assert controller.initialize()
-    monkeypatch.setattr("src.volume_controller.threading.get_ident", lambda: -1)
+    monkeypatch.setattr("src.volume_controller.threading.get_ident", lambda: 99999999)
     assert not controller.initialize()
     get_speakers.assert_called_once_with()
     controller.close()

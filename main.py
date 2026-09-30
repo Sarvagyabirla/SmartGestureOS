@@ -58,6 +58,7 @@ class MainApp:
         self.mapper = GestureMapper(
             SETTINGS["camera"]["width"],
             SETTINGS["camera"]["height"],
+            on_async_result=self._on_async_action_complete,
         )
 
         self.fps_history = collections.deque(maxlen=30)
@@ -167,6 +168,60 @@ class MainApp:
             logger.info("Starting with automation PAUSED; live tracking remains visible.")
         self.start_system()
 
+    def _on_async_action_complete(self, name: str, result) -> None:
+        """Worker-safe callback invoked when an async action finishes.
+
+        Posts UI updates via self.ui_commands; never calls Tk directly.
+        """
+        if name == "screenshot":
+            success = getattr(result, "success", False)
+            if success:
+                msg = getattr(result, "message", "") or ""
+                if msg.startswith("Saved "):
+                    filename = msg[6:].strip()
+                else:
+                    filename = msg.strip() or "screenshot.png"
+                display_text = f"Screenshot saved — {filename}"
+                self.ui_commands.post(lambda: self.ui.show_status_message(display_text))
+                self.ui_commands.post(lambda: self.ui.add_to_history(display_text))
+            else:
+                err_msg = getattr(result, "message", "") or "Capture failed"
+                display_text = f"Screenshot failed: {err_msg}"
+                self.ui_commands.post(lambda: self.ui.show_status_message(display_text))
+                self.ui_commands.post(lambda: self.ui.add_to_history(display_text))
+        elif name == "open_screenshots_folder":
+            success = getattr(result, "success", False)
+            display_text = "Opened Screenshots Folder" if success else "Failed to open Screenshots Folder"
+            self.ui_commands.post(lambda: self.ui.show_status_message(display_text))
+            self.ui_commands.post(lambda: self.ui.add_to_history(display_text))
+        else:
+            success = getattr(result, "success", True) if hasattr(result, "success") else True
+            display_text = f"Executed: {name}" if success else f"Failed: {name}"
+            self.ui_commands.post(lambda: self.ui.add_to_history(display_text))
+
+    def update_tray_status(self) -> None:
+        """Update tray tooltip dynamically based on camera and automation status.
+
+        Thread-safe: does not manipulate Tk.
+        """
+        icon = getattr(self, "tray_icon", None)
+        if icon is None:
+            return
+        connected = bool(getattr(self, "camera", None) and self.camera.is_connected)
+        with self._automation_lock:
+            enabled = self._automation_enabled
+        if not connected:
+            title = "SmartGestureOS — CAMERA DISCONNECTED"
+        elif not enabled:
+            title = "SmartGestureOS — PAUSED"
+        else:
+            title = "SmartGestureOS — ACTIVE"
+        try:
+            if icon.title != title:
+                icon.title = title
+        except Exception:
+            pass
+
     # ── Automation state management (§5) ─────────────────────────────────────
 
     def set_automation_enabled(self, enabled: bool) -> None:
@@ -182,6 +237,7 @@ class MainApp:
             else:
                 self._rearm_state = self._REARM_WAITING
                 logger.info("Automation RESUMED - waiting for neutral before arming.")
+        self.update_tray_status()
 
     def _invalidate_tracking(self) -> None:
         """Release input and invalidate observations from before this reset."""
@@ -411,7 +467,12 @@ class MainApp:
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Exit SmartGestureOS", on_quit),
             )
-            self.tray_icon = pystray.Icon("SmartGestureOS", image, "SmartGestureOS — ACTIVE", menu)
+            initial_title = (
+                "SmartGestureOS — CAMERA DISCONNECTED" if not (getattr(self, "camera", None) and self.camera.is_connected)
+                else "SmartGestureOS — PAUSED" if not self._automation_enabled
+                else "SmartGestureOS — ACTIVE"
+            )
+            self.tray_icon = pystray.Icon("SmartGestureOS", image, initial_title, menu)
             self.tray_icon.run()
         except Exception:
             logger.exception("System tray error:")
@@ -1017,6 +1078,7 @@ class MainApp:
                 getattr(self, "detector_fps", 0.0) if fresh else 0.0,
                 self.detector.average_inference_latency if fresh else 0.0,
             )
+            self.update_tray_status()
             if self._expire_tracking():
                 import numpy as np
                 frame = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)

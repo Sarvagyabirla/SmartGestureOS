@@ -165,8 +165,8 @@ actual filenames and verification dates below; an empty row remains incomplete.
 | Required item | Acceptance before freeze | Current record |
 |---|---|---|
 | Installed demo | Candidate launches from Start Menu, completes the physical matrix and closes safely. | Pending candidate acceptance |
-| Installer backup | Exact `SmartGestureOS-Setup-v0.9.0.exe` plus SHA256; verify both backup copies against the recorded hash. | Pending final artifact verification |
-| Clean-machine evidence | Install, launch, camera/core gestures, uninstall and reinstall on Windows without depending on Python, a venv or the repository. | Pending physical/clean-machine acceptance |
+| Installer backup | Exact `SmartGestureOS-Setup-v0.9.1.exe` plus SHA256; verify both backup copies against the recorded hash. | Pending final artifact verification |
+| Clean-machine evidence | Install, launch, camera/core gestures, uninstall and reinstall on Windows without depending on Python, a venv or the repository. | CLEAN-MACHINE QA PENDING |
 | Source backup | Archive the precise source commit and dependencies/build instructions; retain its commit ID. | Pending final freeze commit |
 | Demo recording | Capture an actual successful installed-app session, including landmarks, cursor/click/drag, modes, pause/resume and real distribution status; play the saved video offline. | NOT CAPTURED |
 | Screenshots | Capture real installed-app dashboard, tracking, each mode and useful result states; remove private desktop information before sharing. | NOT CAPTURED |
@@ -182,7 +182,7 @@ recording, state its candidate version/date and explain the current live failure
 If no recording has been captured, show architecture/source and state that the
 live behavior could not be demonstrated; do not substitute fabricated screenshots.
 
-Freeze only the validated candidate. Record version **0.9.0**, commit, installer
+Freeze only the validated candidate. Record version **0.9.1**, commit, installer
 hash, acceptance evidence and remaining external distribution status together.
 Any code or packaging change after freeze requires a new artifact hash and
 relevant checks before replacing the presentation copy. Never label Store

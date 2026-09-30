@@ -51,11 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Audio COM Cache Redirection & Frozen Packaging**:
   - Redirected `comtypes.client.gen_dir` to `%LOCALAPPDATA%\SmartGestureOS\comtypes_gen` to avoid `PermissionError` when running from read-only directories like `Program Files`.
   - Added `SmartGestureOS.ico` to PyInstaller `datas` and fixed frozen runtime resolution in `_tray_icon_path()`.
-  - Built official Inno Setup 6.7.3 installer (`SmartGestureOS-Setup-v0.9.1.exe`, 31.8 MB, SHA-256 `3844edfd1a47a565fd053b7d188eec3cbd8251e08096895b65e8838125a20822`).
+  - Built official Inno Setup installer (`SmartGestureOS-Setup-v0.9.1.exe`, checksum in `SHA256SUMS.txt`).
 
 - **Automated Test Suite**:
   - Added `tests/test_final_mission_regressions.py` covering all 21 mission requirements.
-  - All 587 tests passing in 12.5s.
+  - All 604 tests passing in full test suite.
 
 
 ---
